@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mihomo Helper</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="logo"><span>Mihomo</span> Helper</div>
+  <span id="statusText" class="topbar-status"><span class="status-dot off"></span>已停止</span>
+  <div class="topbar-actions">
+    <button class="btn btn-success btn-sm" id="btnStart" onclick="controlMihomo('start')">启动</button>
+    <button class="btn btn-danger btn-sm" id="btnStop" onclick="controlMihomo('stop')" style="display:none">停止</button>
+    <button class="btn btn-sm" onclick="controlMihomo('restart')">重启</button>
+    <button class="btn btn-sm" id="btnReload" onclick="reloadConfig()">重载配置</button>
+  </div>
+</header>
+
+<div class="app-body">
+
+<!-- ══ Sidebar Navigation ══ -->
+<nav class="sidebar">
+  <div class="nav-section">
+    <div class="nav-item active" data-tab="dashboard">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span>
+      <span class="nav-label">仪表盘</span>
+    </div>
+    <div class="nav-item" data-tab="proxies">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="5" rx="1"/><rect x="2" y="11" width="20" height="5" rx="1"/><circle cx="18" cy="5.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="18" cy="13.5" r="1.2" fill="currentColor" stroke="none"/></svg></span>
+      <span class="nav-label">代理节点</span>
+    </div>
+    <div class="nav-item" data-tab="groups">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg></span>
+      <span class="nav-label">策略组</span>
+    </div>
+    <div class="nav-item" data-tab="rules">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/><circle cx="7" cy="6" r="1.5" fill="currentColor" stroke="none"/><circle cx="7" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="7" cy="18" r="1.5" fill="currentColor" stroke="none"/></svg></span>
+      <span class="nav-label">路由规则</span>
+    </div>
+    <div class="nav-item" data-tab="xbox">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="11" rx="5"/><line x1="6" y1="12" x2="10" y2="12"/><line x1="8" y1="10" x2="8" y2="14"/><circle cx="16" cy="10.5" r="1" fill="currentColor" stroke="none"/><circle cx="18" cy="12.5" r="1" fill="currentColor" stroke="none"/><circle cx="16" cy="14.5" r="1" fill="currentColor" stroke="none"/><circle cx="14" cy="12.5" r="1" fill="currentColor" stroke="none"/></svg></span>
+      <span class="nav-label">Xbox 代理</span>
+    </div>
+    <div class="nav-item" data-tab="settings">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06-.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
+      <span class="nav-label">设置</span>
+    </div>
+    <div class="nav-item" data-tab="logs">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>
+      <span class="nav-label">日志</span>
+    </div>
+  </div>
+</nav>
+
+<!-- ══ Main Content ══ -->
+<div class="main-content">
+
+<!-- ═══ Dashboard ═══ -->
+<div class="panel active" id="panel-dashboard">
+  <div class="stats-grid">
+    <div class="stat-card speed-dl"><div class="stat-value" id="statDlSpeed">-- B/s</div><div class="stat-label">下行速度</div></div>
+    <div class="stat-card speed-ul"><div class="stat-value" id="statUlSpeed">-- B/s</div><div class="stat-label">上行速度</div></div>
+    <div class="stat-card connections"><div class="stat-value" id="statConns">--</div><div class="stat-label">活跃连接</div></div>
+    <div class="stat-card memory"><div class="stat-value" id="statMemory">--</div><div class="stat-label">内存占用</div></div>
+    <div class="stat-card traffic-down"><div class="stat-value" id="statDownload">--</div><div class="stat-label">累计下载</div></div>
+    <div class="stat-card traffic-up"><div class="stat-value" id="statUpload">--</div><div class="stat-label">累计上传</div></div>
+    <div class="stat-card"><div class="stat-value" id="statProxies">0</div><div class="stat-label">代理节点</div></div>
+    <div class="stat-card"><div class="stat-value" id="statGroups">0</div><div class="stat-label">策略组</div></div>
+    <div class="stat-card"><div class="stat-value" id="statRules">0</div><div class="stat-label">路由规则</div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">活跃连接</span>
+      <div class="btn-group">
+        <input id="connSearch" style="width:180px" placeholder="搜索主机、代理链..." oninput="renderConnTable()">
+        <button class="btn btn-sm btn-danger" onclick="closeAllConns()">关闭全部</button>
+      </div>
+    </div>
+    <div class="conn-table-wrap">
+      <table class="conn-table">
+        <thead><tr><th>目标主机</th><th>协议</th><th>代理链</th><th>↓ 速度</th><th>↑ 速度</th><th>↓ 总量</th><th>↑ 总量</th><th>时长</th><th></th></tr></thead>
+        <tbody id="connTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Proxies ═══ -->
+<div class="panel" id="panel-proxies">
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">代理节点管理</span>
+      <div class="btn-group">
+        <button class="btn btn-sm" onclick="showImportModal()">导入</button>
+        <button class="btn btn-sm" onclick="testAllProxies()">全部测速</button>
+        <button class="btn btn-primary btn-sm" onclick="showAddProxyModal()">添加</button>
+      </div>
+    </div>
+    <div class="proxy-list" id="proxyList"></div>
+  </div>
+</div>
+
+<!-- ═══ Groups ═══ -->
+<div class="panel" id="panel-groups">
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">策略组管理</span>
+      <button class="btn btn-primary btn-sm" onclick="showAddGroupModal()">添加策略组</button>
+    </div>
+    <div class="proxy-list" id="groupList"></div>
+  </div>
+</div>
+
+<!-- ═══ Rules ═══ -->
+<div class="panel" id="panel-rules">
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">路由规则 <small style="color:var(--text2);font-weight:normal">(从上到下匹配)</small></span>
+      <div class="btn-group">
+        <button class="btn btn-sm" onclick="showSubRulePanelRoot()" style="border-color:#7c3aed;color:#5b21b6">⊞ 子规则集管理</button>
+        <button class="btn btn-sm" onclick="showRuleProviderPanel()" style="border-color:#0e7490;color:#0e7490">⊟ 规则集合管理</button>
+        <button class="btn btn-primary btn-sm" onclick="showAddRuleModal()">添加规则</button>
+      </div>
+    </div>
+    <div class="proxy-list" id="ruleList"></div>
+  </div>
+</div>
+
+<!-- ═══ Settings ═══ -->
+<div class="panel" id="panel-settings">
+  <div class="card">
+    <div class="card-header"><span class="card-title">基本设置</span></div>
+    <div class="form-row">
+      <div class="form-group"><label>混合代理端口</label><input type="number" id="sMixedPort" value="7890"></div>
+      <div class="form-group"><label>运行模式</label>
+        <select id="sMode"><option value="rule">规则模式</option><option value="global">全局代理</option><option value="direct">全局直连</option></select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>日志级别</label>
+        <select id="sLogLevel"><option value="silent">静默</option><option value="error">错误</option><option value="warning">警告</option><option value="info" selected>信息</option><option value="debug">调试</option></select>
+      </div>
+      <div class="form-group"><label>允许局域网</label>
+        <div style="padding-top:4px"><label class="toggle"><input type="checkbox" id="sAllowLan" checked><span class="slider"></span></label></div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>mihomo API 端口</label><input type="number" id="sApiPort" value="9090"></div>
+      <div class="form-group"><label>API 密钥</label><input type="text" id="sSecret" placeholder="留空不设密钥"></div>
+    </div>
+    <div class="form-group"><label>mihomo 路径</label><input type="text" id="sMihomoBin" value="/usr/bin/mihomo"></div>
+    <div class="form-group"><label>测速地址</label><input type="text" id="sDelayTestUrl" placeholder="http://www.gstatic.com/generate_204"></div>
+  </div>
+  <div style="text-align:right"><button class="btn btn-primary" onclick="saveSettings()">保存设置</button></div>
+  <div class="card" style="margin-top:12px">
+    <div class="card-header">
+      <span class="card-title">配置预览</span>
+      <button class="btn btn-sm" onclick="loadPreview()">刷新</button>
+    </div>
+    <div class="yaml-preview" id="yamlPreview">点击"刷新"查看生成的 mihomo 配置...</div>
+  </div>
+</div>
+
+<!-- ═══ Logs ═══ -->
+<div class="panel" id="panel-logs">
+  <div class="card" style="margin-bottom:0">
+    <div class="card-header">
+      <span class="card-title">Mihomo 日志</span>
+      <div class="btn-group">
+        <label class="log-follow-label">
+          <input type="checkbox" id="logAutoScroll" checked> 自动滚动
+        </label>
+        <button class="btn btn-sm" onclick="refreshLogs()">刷新</button>
+        <button class="btn btn-sm btn-danger" onclick="clearLogs()">清空</button>
+      </div>
+    </div>
+    <div class="log-viewer" id="logViewer"></div>
+  </div>
+</div>
+
+<!-- ═══ Xbox 代理 ═══ -->
+<div class="panel" id="panel-xbox">
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <span class="card-title">设备代理绑定</span>
+        <div style="font-size:12px;color:var(--text2);margin-top:2px">将设备 IP 绑定到代理节点，以 SRC-IP-CIDR 规则优先匹配</div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="showAddBindingModal()">添加绑定</button>
+    </div>
+    <div class="proxy-list" id="bindingList"></div>
+  </div>
+</div>
+
+</div><!-- main-content -->
+</div><!-- app-body -->
+
+<!-- ═══ Import Modal ═══ -->
+<div class="modal-overlay" id="importModal">
+  <div class="modal">
+    <h3>导入代理</h3>
+    <div class="form-group">
+      <label>导入方式</label>
+      <select id="importType" onchange="toggleImportFields()">
+        <option value="yaml">YAML 代理配置（单条或多条）</option>
+        <option value="uri">单条 URI (ss/vmess/vless/trojan/hy2)</option>
+        <option value="text">批量文本 (每行一条 URI 或 Base64)</option>
+      </select>
+    </div>
+    <div class="form-group" id="importYamlField">
+      <label>YAML 代理配置</label>
+      <textarea id="importYamlContent" rows="10" placeholder="粘贴 YAML 格式代理，例如：
+- {name: &quot;节点名称&quot;, type: hysteria2, server: 1.2.3.4, port: 8882, password: xxx, sni: example.com}
+- {name: &quot;另一个节点&quot;, type: tuic, server: 1.2.3.4, port: 8883, uuid: xxx, password: xxx, alpn: [h3]}"></textarea>
+    </div>
+    <div class="form-group" id="importUriField" style="display:none">
+      <label>代理 URI</label>
+      <input type="text" id="importUri" placeholder="ss://... 或 vmess://... 等">
+    </div>
+    <div class="form-group" id="importTextField" style="display:none">
+      <label>粘贴文本内容</label>
+      <textarea id="importText" rows="8" placeholder="每行一条 URI，或粘贴 Base64 编码内容"></textarea>
+    </div>
+    <div class="btn-group" style="justify-content:flex-end">
+      <button class="btn" onclick="closeModal('importModal')">取消</button>
+      <button class="btn btn-primary" onclick="doImport()">导入</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Add/Edit Proxy Modal ═══ -->
+<div class="modal-overlay" id="proxyModal">
+  <div class="modal">
+    <h3 id="proxyModalTitle">添加代理</h3>
+    <input type="hidden" id="proxyEditId">
+    <div class="form-row">
+      <div class="form-group"><label>名称</label><input type="text" id="pName" placeholder="节点名称"></div>
+      <div class="form-group"><label>别名</label><input type="text" id="pAlias" placeholder="自定义别名（可选）"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>类型</label>
+        <select id="pType"><option value="ss">Shadowsocks</option><option value="vmess">VMess</option><option value="vless">VLESS</option><option value="trojan">Trojan</option><option value="hysteria2">Hysteria2</option><option value="tuic">TUIC</option><option value="http">HTTP</option><option value="socks5">SOCKS5</option></select>
+      </div>
+      <div class="form-group"><label>启用</label>
+        <div style="padding-top:4px"><label class="toggle"><input type="checkbox" id="pEnabled" checked><span class="slider"></span></label></div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>服务器</label><input type="text" id="pServer" placeholder="server.example.com"></div>
+      <div class="form-group"><label>端口</label><input type="number" id="pPort" placeholder="443"></div>
+    </div>
+    <div class="form-group"><label>链式代理 (dialer-proxy)</label>
+      <select id="pDialerProxy">
+        <option value="">不使用链式代理</option>
+      </select>
+    </div>
+    <div class="form-group"><label>扩展参数 (JSON)</label><textarea id="pExtra" rows="6" placeholder='{"password":"xxx","cipher":"aes-256-gcm"}'></textarea></div>
+    <div class="btn-group" style="justify-content:flex-end">
+      <button class="btn" onclick="closeModal('proxyModal')">取消</button>
+      <button class="btn btn-primary" onclick="saveProxy()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Add/Edit Group Modal ═══ -->
+<div class="modal-overlay" id="groupModal">
+  <div class="modal">
+    <h3 id="groupModalTitle">添加策略组</h3>
+    <input type="hidden" id="groupEditId">
+    <div class="form-row">
+      <div class="form-group"><label>名称</label><input type="text" id="gName" placeholder="策略组名称"></div>
+      <div class="form-group"><label>类型</label>
+        <select id="gType"><option value="select">手动选择 (select)</option><option value="url-test">自动选择 (url-test)</option><option value="fallback">自动回退 (fallback)</option><option value="load-balance">负载均衡 (load-balance)</option><option value="relay">链式代理 (relay)</option></select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>包含所有代理</label>
+      <div style="padding-top:4px"><label class="toggle"><input type="checkbox" id="gIncludeAll"><span class="slider"></span></label></div>
+    </div>
+    <div class="form-group" id="gProxiesField">
+      <label>选择代理/策略（点击添加，点击已选标签移除）</label>
+      <div class="proxy-picker">
+        <div class="proxy-picker-selected" id="gProxySelected"><span class="picker-empty">未选择任何节点</span></div>
+        <div class="proxy-picker-divider"></div>
+        <div class="proxy-picker-options" id="gProxyOptions"></div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>测试 URL</label><input type="text" id="gUrl" value="https://www.gstatic.com/generate_204"></div>
+      <div class="form-group"><label>测试间隔 (秒)</label><input type="number" id="gInterval" value="300"></div>
+    </div>
+    <div class="btn-group" style="justify-content:flex-end">
+      <button class="btn" onclick="closeModal('groupModal')">取消</button>
+      <button class="btn btn-primary" onclick="saveGroup()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Add/Edit Rule Modal ═══ -->
+<div class="modal-overlay" id="ruleModal">
+  <div class="modal">
+    <h3 id="ruleModalTitle">添加规则</h3>
+    <input type="hidden" id="ruleEditId">
+    <div id="rParentInfo" style="display:none;margin-bottom:12px">
+      <div style="background:rgba(109,40,217,0.12);border:1px solid #6d28d9;border-radius:6px;padding:8px 12px;font-size:13px;display:flex;align-items:center;gap:8px">
+        <span style="color:#a78bfa">添加到子规则集：</span>
+        <b id="rParentName" style="color:#c4b5fd"></b>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>规则类型</label>
+        <select id="rType">
+          <option value="DOMAIN">DOMAIN</option><option value="DOMAIN-SUFFIX">DOMAIN-SUFFIX</option>
+          <option value="DOMAIN-KEYWORD">DOMAIN-KEYWORD</option><option value="DOMAIN-WILDCARD">DOMAIN-WILDCARD</option>
+          <option value="DOMAIN-REGEX">DOMAIN-REGEX</option>
+          <option value="GEOSITE">GEOSITE</option><option value="GEOIP">GEOIP</option>
+          <option value="IP-CIDR">IP-CIDR</option><option value="IP-CIDR6">IP-CIDR6</option>
+          <option value="IP-SUFFIX">IP-SUFFIX</option><option value="IP-ASN">IP-ASN</option>
+          <option value="SRC-IP-CIDR">SRC-IP-CIDR</option><option value="SRC-IP-SUFFIX">SRC-IP-SUFFIX</option>
+          <option value="SRC-IP-ASN">SRC-IP-ASN</option><option value="SRC-GEOIP">SRC-GEOIP</option>
+          <option value="DST-PORT">DST-PORT</option><option value="SRC-PORT">SRC-PORT</option>
+          <option value="IN-PORT">IN-PORT</option><option value="IN-TYPE">IN-TYPE</option>
+          <option value="IN-USER">IN-USER</option><option value="IN-NAME">IN-NAME</option>
+          <option value="PROCESS-NAME">PROCESS-NAME</option><option value="PROCESS-NAME-WILDCARD">PROCESS-NAME-WILDCARD</option>
+          <option value="PROCESS-NAME-REGEX">PROCESS-NAME-REGEX</option>
+          <option value="PROCESS-PATH">PROCESS-PATH</option><option value="PROCESS-PATH-WILDCARD">PROCESS-PATH-WILDCARD</option>
+          <option value="PROCESS-PATH-REGEX">PROCESS-PATH-REGEX</option>
+          <option value="UID">UID</option><option value="NETWORK">NETWORK</option><option value="DSCP">DSCP</option>
+          <option value="AND">AND</option><option value="OR">OR</option><option value="NOT">NOT</option>
+          <option value="RULE-SET">RULE-SET</option><option value="SUB-RULE">SUB-RULE</option><option value="MATCH">MATCH</option>
+        </select>
+      </div>
+      <div class="form-group" id="rTargetField"><label>目标策略</label>
+        <select id="rTarget"><option value="DIRECT">DIRECT</option><option value="REJECT">REJECT</option></select>
+      </div>
+    </div>
+    <div class="form-group" id="rPayloadField">
+      <label id="rPayloadLabel">匹配内容</label>
+      <input type="text" id="rPayload" placeholder="google.com / CN / 8.8.8.0/24 等">
+    </div>
+    <div class="form-row" id="rSubRuleCondRow" style="display:none">
+      <div class="form-group">
+        <label>条件类型</label>
+        <select id="rCondType">
+          <option value="NETWORK">NETWORK（协议）</option>
+          <option value="DOMAIN">DOMAIN</option>
+          <option value="DOMAIN-SUFFIX">DOMAIN-SUFFIX</option>
+          <option value="DOMAIN-KEYWORD">DOMAIN-KEYWORD</option>
+          <option value="DOMAIN-REGEX">DOMAIN-REGEX</option>
+          <option value="GEOIP">GEOIP</option>
+          <option value="GEOSITE">GEOSITE</option>
+          <option value="IP-CIDR">IP-CIDR</option>
+          <option value="IP-CIDR6">IP-CIDR6</option>
+          <option value="PROCESS-NAME">PROCESS-NAME</option>
+          <option value="DST-PORT">DST-PORT</option>
+          <option value="SRC-PORT">SRC-PORT</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>条件值</label>
+        <input type="text" id="rCondPayload" placeholder="tcp / udp / CN / example.com 等">
+        <select id="rCondPayloadSel" style="display:none">
+          <option value="tcp">tcp</option>
+          <option value="udp">udp</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group" id="rSubRuleSetRow" style="display:none">
+      <label>跳转子规则集合</label>
+      <select id="rSubRuleSetName"><option value="">（暂无子规则集合）</option></select>
+    </div>
+    <div class="form-group" id="rRuleSetRow" style="display:none">
+      <label>规则集合</label>
+      <select id="rRuleSetName"><option value="">（暂无规则集合）</option></select>
+    </div>
+    <div class="form-group" id="rPositionField">
+      <label>添加位置</label>
+      <div style="display:flex;gap:20px;padding-top:6px">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--text)">
+          <input type="radio" name="rPosition" value="append" checked> 后置（追加到末尾）
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--text)">
+          <input type="radio" name="rPosition" value="prepend"> 前置（插入到首位）
+        </label>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>no-resolve (跳过 DNS 解析)</label>
+      <div style="padding-top:4px"><label class="toggle"><input type="checkbox" id="rNoResolve"><span class="slider"></span></label></div>
+    </div>
+    <div class="btn-group" style="justify-content:flex-end">
+      <button class="btn" onclick="closeModal('ruleModal')">取消</button>
+      <button class="btn btn-primary" onclick="saveRule()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<!-- ═══ Sub-Rule Manager Side Panel ═══ -->
+<div class="side-panel-overlay" id="subRulePanel" onclick="closeSidePanel()">
+  <div class="side-panel" onclick="event.stopPropagation()">
+    <div class="side-panel-header">
+      <div style="flex:1;min-width:0">
+        <h3 style="margin-bottom:0" id="srPanelTitle">子规则集管理</h3>
+        <div class="breadcrumb" id="srBreadcrumb"></div>
+      </div>
+      <button class="btn-icon" onclick="closeSidePanel()" style="font-size:20px;color:var(--text2);line-height:1;flex-shrink:0">✕</button>
+    </div>
+    <div class="side-panel-body">
+      <div class="btn-group" style="margin-bottom:14px" id="srPanelActions"></div>
+      <div id="srTreeContent">
+        <div style="text-align:center;padding:40px;color:var(--text2)">加载中...</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Sub-rule Set Name Modal ═══ -->
+<div class="modal-overlay" id="srSetModal">
+  <div class="modal">
+    <h3 id="srSetModalTitle">新建子规则集</h3>
+    <div class="form-group">
+      <label>集合名称</label>
+      <input type="text" id="srSetName" placeholder="如: TCPRules, CNRules, sub-rule-1">
+    </div>
+    <div class="btn-group" style="justify-content:flex-end">
+      <button class="btn" onclick="closeModal('srSetModal')">取消</button>
+      <button class="btn btn-primary" onclick="saveSrSetName()">确定</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Rule Provider (RULE-SET) Side Panel ═══ -->
+<div class="side-panel-overlay" id="ruleProviderPanel" onclick="closeRuleProviderPanel()">
+  <div class="side-panel" onclick="event.stopPropagation()">
+    <div class="side-panel-header">
+      <div style="flex:1;min-width:0">
+        <h3 style="margin-bottom:0">规则集合管理</h3>
+        <div style="font-size:12px;color:var(--text2);margin-top:2px">rule-providers</div>
+      </div>
+      <button class="btn-icon" onclick="closeRuleProviderPanel()" style="font-size:20px;color:var(--text2);line-height:1;flex-shrink:0">✕</button>
+    </div>
+    <div class="side-panel-body">
+      <div class="btn-group" style="margin-bottom:14px">
+        <button class="btn btn-primary btn-sm" onclick="showAddRuleProviderModal()">+ 新建规则集合</button>
+      </div>
+      <div id="rpContent">
+        <div style="text-align:center;padding:40px;color:var(--text2)">加载中...</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Rule Provider Add/Edit Modal ═══ -->
+<div class="modal-overlay" id="rpModal">
+  <div class="modal">
+    <h3 id="rpModalTitle">新建规则集合</h3>
+    <div class="form-row">
+      <div class="form-group"><label>名称</label>
+        <input type="text" id="rpName" placeholder="如: apple, custom-rules">
+      </div>
+      <div class="form-group"><label>行为 (behavior)</label>
+        <select id="rpBehavior">
+          <option value="domain">domain（域名）</option>
+          <option value="ipcidr">ipcidr（IP段）</option>
+          <option value="classical">classical（经典）</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>类型 (type)</label>
+        <select id="rpType" onchange="onRpTypeChange()">
+          <option value="http">http（远程）</option>
+          <option value="file">file（本地）</option>
+        </select>
+      </div>
+      <div class="form-group"><label>格式 (format)</label>
+        <select id="rpFormat">
+          <option value="yaml">yaml</option>
+          <option value="mrs">mrs</option>
+          <option value="text">text</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group" id="rpUrlField">
+      <label>URL（远程地址）</label>
+      <input type="text" id="rpUrl" placeholder="https://example.com/rules/apple.yaml">
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>本地路径 (path)</label>
+        <input type="text" id="rpPath" placeholder="./rule_providers/apple.yaml">
+      </div>
+      <div class="form-group" id="rpIntervalField"><label>更新间隔（秒）</label>
+        <input type="number" id="rpInterval" value="86400">
+      </div>
+    </div>
+    <div class="btn-group" style="justify-content:flex-end">
+      <button class="btn" onclick="closeModal('rpModal')">取消</button>
+      <button class="btn btn-primary" onclick="saveRuleProvider()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Device Binding Modal ═══ -->
+<div class="modal-overlay" id="bindingModal">
+  <div class="modal">
+    <h3 id="bindingModalTitle">添加设备绑定</h3>
+    <input type="hidden" id="bindingEditId">
+    <div class="form-row">
+      <div class="form-group"><label>设备名称（备注）</label><input type="text" id="bLabel" placeholder="Xbox One / Switch"></div>
+      <div class="form-group"><label>设备 IP</label><input type="text" id="bIp" placeholder="192.168.1.100"></div>
+    </div>
+    <div class="form-group"><label>绑定代理 / 策略组</label><select id="bProxy"></select></div>
+    <div class="btn-group" style="justify-content:flex-end">
+      <button class="btn" onclick="closeModal('bindingModal')">取消</button>
+      <button class="btn btn-primary" onclick="saveBinding()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

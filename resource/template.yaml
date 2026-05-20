@@ -1,0 +1,66 @@
+# 基础配置
+mixed-port: 7890
+tproxy-port: 7893
+allow-lan: true
+bind-address: "*"
+mode: rule
+routing-mark: 6666
+log-level: info
+ipv6: false
+find-process-mode: off
+
+# 管理面板配置
+external-controller: 0.0.0.0:9090
+external-ui: metacubexd-gh-pages
+external-ui-url: https://github.com/MetaCubeX/metacubexd/archive/refs/heads/gh-pages.zip
+secret: ""
+
+# 配置存储
+profile:
+  store-selected: true
+  store-fake-ip: true
+
+# GEO 数据配置
+geodata-mode: true 
+geodata-loader: standard
+geo-auto-update: false
+
+# 流量嗅探
+sniffer:
+  enable: true
+  force-dns-mapping: true
+  parse-pure-ip: true
+  sniff:
+    HTTP:
+      ports:
+        - 80
+        - 8080-8880
+      override-destination: true
+    QUIC:
+      ports:
+        - 443
+        - 8443
+    TLS:
+      ports:
+        - 443
+        - 8443
+
+# DNS配置
+dns:
+  enable: true
+  use-hosts: true
+  ipv6: false
+  listen: 0.0.0.0:1053
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  nameserver:
+    - 119.29.29.29
+    - 223.5.5.5
+  fallback:
+    - 8.8.8.8
+    - 8.8.4.4
+    - tls://1.0.0.1:853
+    - tls://dns.google:853
+  fake-ip-filter:
+    - '*.lan'
+
