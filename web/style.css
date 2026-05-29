@@ -98,6 +98,7 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 4px; display: block
 .proxy-item .name small { color: var(--text2); font-weight: normal; display: block; font-size: 12px; }
 .proxy-item .meta { color: var(--text2); font-size: 13px; white-space: nowrap; }
 .proxy-item .type-badge { background: var(--bg3); padding: 2px 8px; border-radius: 4px; font-size: 11px; text-transform: uppercase; color: var(--accent); font-weight: 600; flex-shrink: 0; }
+.proxy-item .proxy-type-badge { display: inline-flex; align-items: center; justify-content: center; width: 78px; min-height: 22px; padding-left: 6px; padding-right: 6px; }
 .proxy-item.disabled { opacity: 0.5; }
 .lat-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; white-space: nowrap; flex-shrink: 0; background: var(--bg3); color: var(--text2); min-width: 40px; text-align: center; }
 .lat-badge.ok      { background: rgba(16,185,129,0.15); color: #059669; }

@@ -259,7 +259,7 @@ function renderProxies() {
       : `<span class="lat-badge ok">${lat}ms</span>`;
     return `
     <div class="proxy-item ${p.enabled ? '' : 'disabled'}">
-      <span class="type-badge">${esc(p.type)}</span>
+      <span class="type-badge proxy-type-badge">${esc(p.type)}</span>
       <div class="name">
         ${esc(p.alias || p.name)}
         ${p.alias ? '<small>原名: ' + esc(p.name) + '</small>' : ''}
@@ -1304,4 +1304,3 @@ async function testAllProxies() {
   if (!proxies.length) return;
   await Promise.all(proxies.map(p => testProxyDelay(p.id)));
 }
-
