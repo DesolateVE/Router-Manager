@@ -62,7 +62,7 @@ class AppSettings(BaseModel):
     mihomo_api_port: int = 9090
     mihomo_api_secret: str = ""
     management_port: int = 9080
-    mihomo_bin: str = "/usr/bin/mihomo"
+    mihomo_bin: str = "/etc/mihomo_helper/mihomo"
     data_dir: str = "/etc/mihomo_helper"
     ipv6: bool = False
     find_process_mode: str = "off"

@@ -34,7 +34,7 @@ mihomo_helper_py/
 │   ├── app.js        # 前端交互逻辑
 │   └── style.css     # 暗色主题样式
 ├── requirements.txt
-├── deploy.sh         # OpenWrt SSH 部署脚本
+├── deploy.py         # OpenWrt SSH 部署脚本
 └── README.md
 ```
 
@@ -81,35 +81,45 @@ python main.py --data-dir ./data --port 9080
 
 ### 前提条件
 
-本机已安装 `sshpass`：
+本机已安装 `python3`。不填写密码时，还需要本机可用的 `ssh` / `scp` 和 SSH 密钥。
+
+如需使用密码登录，还需要安装 Python 包 `paramiko`：
 
 ```bash
-# Ubuntu / Debian
-sudo apt install sshpass
-
-# macOS
-brew install sshpass
+pip install paramiko
 ```
 
-目标设备 `10.0.8.84` 需满足：
+目标设备需满足：
 - 已联网，可访问 opkg 源
 - 存储空间充足（Python3 + 依赖约 80MB）
 
 ### 一键部署
 
 ```bash
-./deploy.sh
+python deploy.py
+```
+
+指定 IP、账号和密码：
+
+```bash
+python deploy.py --ip 10.0.8.84 --user root --password weiyi
+```
+
+不传 `--password` 时，脚本会直接使用本机 SSH 密钥或 ssh-agent 连接：
+
+```bash
+python deploy.py --ip 10.0.8.84 --user root
 ```
 
 脚本会自动完成以下操作：
 
 1. 上传项目文件到 `/opt/mihomo_helper/`
-2. 通过 `opkg` 安装 `python3`、`python3-pip`
-3. 通过 `pip3` 安装 Python 依赖
+2. 上传资源文件到 `/etc/mihomo_helper/`
+3. 设置防火墙脚本和 `mihomo` 核心执行权限
 4. 写入 procd init 脚本 `/etc/init.d/mihomo_helper`
-5. 设置开机自启并立即启动服务
+5. 设置开机自启并立即启动服务，服务启动时自动拉起 `mihomo`
 
-部署成功后访问：`http://10.0.8.84:9080`
+部署成功后访问：`http://10.0.8.84:8080`
 
 ### 手动管理服务
 
@@ -131,16 +141,17 @@ logread | grep mihomo
 
 ### 部署参数说明
 
-| 变量 | 值 | 说明 |
+| 参数 | 默认值 | 说明 |
 |------|----|------|
-| `TARGET_HOST` | `10.0.8.84` | 目标设备 IP |
-| `TARGET_USER` | `root` | SSH 用户名 |
-| `TARGET_PASS` | `weiyi` | SSH 密码 |
-| `TARGET_DIR` | `/opt/mihomo_helper` | 程序安装目录 |
-| `DATA_DIR` | `/etc/mihomo_helper` | 数据目录 |
-| `SERVICE_PORT` | `9080` | Web UI 端口 |
+| `--host`, `--ip` | `10.0.8.84` | 目标设备 IP / 主机名 |
+| `--user`, `--username` | `root` | SSH 用户名 |
+| `--password`, `-p` | 空 | SSH 密码；不填写则使用 SSH 密钥 |
+| `--target-dir` | `/opt/mihomo_helper` | 程序安装目录 |
+| `--data-dir` | `/etc/mihomo_helper` | 数据目录 |
+| `--port` | `8080` | Web UI 端口 |
+| `--connect-timeout` | `10` | SSH 连接超时时间（秒） |
 
-如需修改以上参数，编辑 `deploy.sh` 顶部的变量即可。
+使用 `python deploy.py --help` 可以查看完整参数说明。
 
 ---
 

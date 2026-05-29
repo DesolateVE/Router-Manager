@@ -34,62 +34,39 @@ ip rule add fwmark $PROXY_FWMARK table $TABLE_ID
 ip route add local default dev lo table $TABLE_ID
 
 # --- 5. 应用 nftables 规则 ---
+# OpenWrt 的 nft 版本可能不会从 "table inet mihomo { ... }" 声明自动创建表，
+# 所以这里显式 add table/add chain/add rule。
 nft -f - <<EOF
-table inet mihomo {
-    set reserved_ip {
-        type ipv4_addr
-        flags interval
-        elements = {
-            0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 
-            169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 
-            224.0.0.0/4, 240.0.0.0/4
-        }
-    }
+add table inet mihomo
 
-    chain prerouting {
-        type filter hook prerouting priority mangle; policy accept;
-        
-        # 1. 关键：只处理 IPv4。如果是 IPv6 流量，直接返回，不进入代理
-        meta nfproto != ipv4 return
+add set inet mihomo reserved_ip { type ipv4_addr; flags interval; elements = {
+    0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8,
+    169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16,
+    224.0.0.0/4, 240.0.0.0/4
+} }
 
-        # 2. 排除 Mihomo 自身发出的流量，避免代理回环
-        meta mark $ROUTING_MARK return
+add chain inet mihomo prerouting { type filter hook prerouting priority mangle; policy accept; }
+add rule inet mihomo prerouting meta nfproto != ipv4 return
+add rule inet mihomo prerouting meta mark $ROUTING_MARK return
+add rule inet mihomo prerouting fib daddr type local return
+add rule inet mihomo prerouting ip daddr @reserved_ip return
+add rule inet mihomo prerouting udp dport 53 tproxy ip to :$DNS_PORT meta mark set $PROXY_FWMARK accept
+add rule inet mihomo prerouting tcp dport 53 tproxy ip to :$DNS_PORT meta mark set $PROXY_FWMARK accept
+add rule inet mihomo prerouting meta l4proto { tcp, udp } tproxy ip to :$TPROXY_PORT meta mark set $PROXY_FWMARK accept
 
-        # 2.1 放行真正访问本机地址的连接；被策略路由重定向到 lo 的外部流量仍需继续进入 TProxy
-        fib daddr type local return
-        
-        # 3. 排除内网/保留地址
-        ip daddr @reserved_ip return
-
-        # 4. 劫持 DNS (UDP/TCP)
-        udp dport 53 tproxy to :$DNS_PORT meta mark set $PROXY_FWMARK accept
-        tcp dport 53 tproxy to :$DNS_PORT meta mark set $PROXY_FWMARK accept
-        
-        # 5. TProxy 劫持其余所有 IPv4 TCP/UDP 流量
-        meta l4proto { tcp, udp } tproxy to :$TPROXY_PORT meta mark set $PROXY_FWMARK accept
-    }
-    
-    chain output {
-        type route hook output priority mangle; policy accept;
-        
-        # 1. 只处理 IPv4
-        meta nfproto != ipv4 return
-
-        # 2. 排除 Mihomo 自身流量（核心：防止死循环）
-        meta mark $ROUTING_MARK return
-        
-        # 3. 排除保留地址（避免对内网流量打标增加无谓开销）
-        ip daddr @reserved_ip return
-        
-        # 4. 本机 DNS 劫持
-        udp dport 53 meta mark set $PROXY_FWMARK
-        tcp dport 53 meta mark set $PROXY_FWMARK
-        
-        # 5. 本机流量打标，使其重新路由并进入 prerouting 链进行 TProxy 截获
-        meta l4proto { tcp, udp } meta mark set $PROXY_FWMARK
-    }
-}
+add chain inet mihomo output { type route hook output priority mangle; policy accept; }
+add rule inet mihomo output meta nfproto != ipv4 return
+add rule inet mihomo output meta mark $ROUTING_MARK return
+add rule inet mihomo output ip daddr @reserved_ip return
+add rule inet mihomo output udp dport 53 meta mark set $PROXY_FWMARK
+add rule inet mihomo output tcp dport 53 meta mark set $PROXY_FWMARK
+add rule inet mihomo output meta l4proto { tcp, udp } meta mark set $PROXY_FWMARK
 EOF
+
+if [ $? -ne 0 ]; then
+    echo "❌ nftables TProxy 规则应用失败，请检查 nft_tproxy / kmod-nft-tproxy 是否已安装"
+    exit 1
+fi
 
 echo "🎉 IPv4-Only TProxy 规则应用成功！"
 echo "💡 IPv6 流量现在将绕过代理直连，且不会产生多播连接日志。"

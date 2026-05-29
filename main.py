@@ -55,13 +55,18 @@ def main() -> None:
     parser.add_argument(
         "-p", "--port",
         type=int,
-        default=9080,
-        help="Management HTTP port (default: 9080)",
+        default=8080,
+        help="Management HTTP port (default: 8080)",
     )
     parser.add_argument(
         "--host",
         default="0.0.0.0",
         help="Bind address (default: 0.0.0.0)",
+    )
+    parser.add_argument(
+        "--auto-start-mihomo",
+        action="store_true",
+        help="Start mihomo core when mihomo_helper starts",
     )
     args = parser.parse_args()
 
@@ -75,6 +80,10 @@ def main() -> None:
 
     signal.signal(signal.SIGTERM, _shutdown)
     signal.signal(signal.SIGHUP, _shutdown)
+
+    if args.auto_start_mihomo:
+        if not _proc.start(_store.get_state()):
+            print(f"Failed to auto-start mihomo: {_proc.last_error}", file=sys.stderr)
 
     uvicorn.run(app, host=args.host, port=args.port)
 
