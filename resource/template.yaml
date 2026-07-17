@@ -16,7 +16,6 @@ external-controller-cors:
   allow-origins:
     - "*"
 external-ui: metacubexd-gh-pages
-external-ui-url: https://github.com/MetaCubeX/metacubexd/archive/refs/heads/gh-pages.zip
 secret: ""
 
 # 配置存储

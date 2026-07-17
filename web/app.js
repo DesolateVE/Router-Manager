@@ -244,6 +244,7 @@ async function refreshStatus() {
 async function controlMihomo(action) {
   try {
     await api('/api/' + action, { method: 'POST' });
+    if (action === 'start' || action === 'restart') clearConfigDirty();
     toast(action === 'start' ? '已启动' : action === 'stop' ? '已停止' : '已重启');
     if (action === 'stop') { stopConnWs(); }
     if (action === 'start' || action === 'restart') { setTimeout(startConnWs, 1200); }
@@ -993,7 +994,10 @@ async function reloadConfig() {
   try {
     const r = await api('/api/reload', { method: 'POST' });
     if (r.error) toast('重载失败: ' + r.error, 'error');
-    else toast('配置已重载');
+    else {
+      clearConfigDirty();
+      toast('配置已重载');
+    }
   } catch (e) { toast('重载失败', 'error'); }
 }
 
