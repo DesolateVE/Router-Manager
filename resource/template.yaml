@@ -11,6 +11,10 @@ find-process-mode: off
 
 # 管理面板配置
 external-controller: 0.0.0.0:9090
+external-controller-cors:
+  allow-private-network: true
+  allow-origins:
+    - "*"
 external-ui: metacubexd-gh-pages
 external-ui-url: https://github.com/MetaCubeX/metacubexd/archive/refs/heads/gh-pages.zip
 secret: ""

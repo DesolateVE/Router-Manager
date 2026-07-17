@@ -6,7 +6,7 @@ from typing import Any
 
 import yaml
 
-from models import AppState, AppSettings, ProxyGroup, ProxyNode, Rule, RuleProvider, SubRuleEntry
+from models import AppState, AppSettings, ProxyGroup, ProxyNode, Rule, RuleProvider, SubRuleEntry, TunnelEntry
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -81,6 +81,17 @@ def _build_group(
         d["timeout"] = g.timeout
 
     return d
+
+
+def _build_tunnel(tunnel: TunnelEntry, state: AppState, id_to_name: dict[str, str]) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "network": tunnel.network,
+        "address": tunnel.address,
+        "target": tunnel.target,
+    }
+    if tunnel.proxy:
+        out["proxy"] = _resolve_ref(state, tunnel.proxy, id_to_name)
+    return out
 
 
 
@@ -189,5 +200,12 @@ def generate(state: AppState) -> str:
     else:
         cfg.pop("rules", None)
 
-    # 8. Emit YAML
+    # 9. tunnels block
+    enabled_tunnels = [t for t in state.tunnels if t.enabled and t.address and t.target and t.network]
+    if enabled_tunnels:
+        cfg["tunnels"] = [_build_tunnel(t, state, id_to_name) for t in enabled_tunnels]
+    else:
+        cfg.pop("tunnels", None)
+
+    # 10. Emit YAML
     return yaml.dump(cfg, allow_unicode=True, sort_keys=False, default_flow_style=False)

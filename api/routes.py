@@ -1,17 +1,18 @@
 """FastAPI route definitions — mirrors src/http/api_server.cpp."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 import httpx
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import PlainTextResponse
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 
 import config_gen
 import import_engine
-from models import AppSettings, DeviceBinding, ProxyGroup, ProxyNode, Rule, RuleProvider, SubRuleEntry
+from models import AppSettings, DeviceBinding, ProxyGroup, ProxyNode, Rule, RuleProvider, SubRuleEntry, TunnelEntry
 from process_mgr import ProcessManager
 from store import Store
 
@@ -376,6 +377,31 @@ def create_router(store: Store, proc_mgr: ProcessManager) -> APIRouter:
             raise HTTPException(status_code=404, detail="Device binding not found")
         return {"ok": True}
 
+    # ── Tunnels ───────────────────────────────────────────────────────────
+
+    @router.get("/api/tunnels")
+    def get_tunnels() -> list[TunnelEntry]:
+        return store.get_tunnels()
+
+    @router.post("/api/tunnels", status_code=201)
+    def post_tunnel(body: TunnelEntry) -> TunnelEntry:
+        from models import generate_id
+        body.id = generate_id()
+        store.add_tunnel(body)
+        return body
+
+    @router.put("/api/tunnels/{tunnel_id}")
+    def put_tunnel(tunnel_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        if not store.update_tunnel(tunnel_id, body):
+            raise HTTPException(status_code=404, detail="Tunnel not found")
+        return {"ok": True}
+
+    @router.delete("/api/tunnels/{tunnel_id}")
+    def delete_tunnel(tunnel_id: str) -> dict[str, Any]:
+        if not store.delete_tunnel(tunnel_id):
+            raise HTTPException(status_code=404, detail="Tunnel not found")
+        return {"ok": True}
+
     # ── Close Connections ─────────────────────────────────────────────────
 
     @router.delete("/api/connections")
@@ -415,5 +441,81 @@ def create_router(store: Store, proc_mgr: ProcessManager) -> APIRouter:
             return {"ok": True}
         except httpx.ConnectError as exc:
             raise HTTPException(status_code=502, detail="Mihomo API 无法连接") from exc
+
+    # ── MetaCubeXD Entry/Reverse Proxy ──────────────────────────────────
+
+    @router.get("/metacubexd-entry", response_class=HTMLResponse)
+    def metacubexd_entry() -> str:
+        s = store.get_settings()
+        port = int(s.mihomo_api_port)
+        secret_js = json.dumps(s.mihomo_api_secret or "")
+        return f"""<!doctype html>
+<html lang=\"zh-CN\">
+<head><meta charset=\"utf-8\"><title>MetaCubeXD</title></head>
+<body>
+<script>
+(function () {{
+  var host = location.hostname || '127.0.0.1';
+    var endpointId = 'router-manager';
+  var endpoint = {{
+        id: endpointId,
+    url: 'http://' + host + ':{port}',
+    secret: {secret_js}
+  }};
+    var endpointList = [];
+    try {{
+        endpointList = JSON.parse(localStorage.getItem('endpointList') || '[]');
+        if (!Array.isArray(endpointList)) endpointList = [];
+    }} catch (_) {{
+        endpointList = [];
+    }}
+    endpointList = endpointList.filter(function (item) {{
+        return item && item.id !== endpointId;
+    }});
+    endpointList.unshift(endpoint);
+    localStorage.setItem('endpointList', JSON.stringify(endpointList));
+    localStorage.setItem('selectedEndpoint', endpointId);
+  location.replace('/metacubexd/');
+}})();
+</script>
+</body>
+</html>"""
+
+    @router.get("/metacubexd")
+    def metacubexd_root() -> RedirectResponse:
+        return RedirectResponse(url="/metacubexd/", status_code=307)
+
+    @router.api_route("/metacubexd/{path:path}", methods=["GET", "HEAD"])
+    async def metacubexd_proxy(path: str, request: Request) -> Response:
+        s = store.get_settings()
+        upstream = f"http://127.0.0.1:{s.mihomo_api_port}/ui/{path}"
+        if request.url.query:
+            upstream = f"{upstream}?{request.url.query}"
+
+        passthrough_headers: dict[str, str] = {}
+        for key in ("accept", "accept-encoding", "accept-language", "cache-control", "pragma", "user-agent"):
+            value = request.headers.get(key)
+            if value:
+                passthrough_headers[key] = value
+
+        try:
+            async with httpx.AsyncClient(follow_redirects=True, timeout=10.0) as client:
+                resp = await client.request(request.method, upstream, headers=passthrough_headers)
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=502, detail=f"metacubexd upstream unavailable: {exc}") from exc
+
+        excluded = {
+            "content-length",
+            "transfer-encoding",
+            "connection",
+            "keep-alive",
+            "proxy-authenticate",
+            "proxy-authorization",
+            "te",
+            "trailers",
+            "upgrade",
+        }
+        out_headers = {k: v for k, v in resp.headers.items() if k.lower() not in excluded}
+        return Response(content=resp.content, status_code=resp.status_code, headers=out_headers)
 
     return router

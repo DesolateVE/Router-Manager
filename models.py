@@ -1,4 +1,4 @@
-"""Data models for mihomo_helper — mirrors src/core/types.hpp."""
+"""Data models for Router Manager — mirrors src/core/types.hpp."""
 from __future__ import annotations
 
 import uuid
@@ -62,8 +62,8 @@ class AppSettings(BaseModel):
     mihomo_api_port: int = 9090
     mihomo_api_secret: str = ""
     management_port: int = 9080
-    mihomo_bin: str = "/etc/mihomo_helper/mihomo"
-    data_dir: str = "/etc/mihomo_helper"
+    mihomo_bin: str = "/etc/router_manager/mihomo"
+    data_dir: str = "/etc/router_manager"
     ipv6: bool = False
     find_process_mode: str = "off"
     delay_test_url: str = "http://www.gstatic.com/generate_204"
@@ -86,6 +86,16 @@ class DeviceBinding(BaseModel):
     enabled: bool = True
 
 
+class TunnelEntry(BaseModel):
+    id: str = Field(default_factory=generate_id)
+    label: str = ""
+    network: list[str] = Field(default_factory=lambda: ["tcp"])
+    address: str = ""
+    target: str = ""
+    proxy: str = ""
+    enabled: bool = True
+
+
 class AppState(BaseModel):
     settings: AppSettings = Field(default_factory=AppSettings)
     proxies: list[ProxyNode] = Field(default_factory=list)
@@ -94,3 +104,4 @@ class AppState(BaseModel):
     sub_rule_sets: dict[str, list[SubRuleEntry]] = Field(default_factory=dict)
     rule_providers: dict[str, RuleProvider] = Field(default_factory=dict)
     device_bindings: list[DeviceBinding] = Field(default_factory=list)
+    tunnels: list[TunnelEntry] = Field(default_factory=list)

@@ -50,6 +50,22 @@ def _parse_query(query: str) -> dict[str, str]:
     return result
 
 
+def _truthy(value: str) -> bool:
+    return value.lower() in ("1", "true", "yes", "on")
+
+
+def _parsed_host_port(parsed: Any) -> tuple[str, int] | None:
+    """Extract host/port from urlparse result, handling invalid ports."""
+    try:
+        host = parsed.hostname or ""
+        port = parsed.port
+    except ValueError:
+        return None
+    if not host or port is None:
+        return None
+    return host, int(port)
+
+
 def _is_valid(n: ProxyNode) -> bool:
     return bool(n.type and n.server and n.port > 0)
 
@@ -269,6 +285,75 @@ def _parse_hysteria2(uri: str) -> ProxyNode | None:
     return node if _is_valid(node) else None
 
 
+def _parse_http(uri: str) -> ProxyNode | None:
+    """Parse http:// or https:// proxy URI."""
+    parsed = urlparse(uri)
+    node = ProxyNode(id=generate_id(), type="http", enabled=True)
+    node.name = unquote(parsed.fragment) if parsed.fragment else ""
+
+    hp = _parsed_host_port(parsed)
+    if hp is None:
+        return None
+    node.server, node.port = hp
+
+    username = unquote(parsed.username or "")
+    password = unquote(parsed.password or "")
+    if username:
+        node.extra["username"] = username
+    if password:
+        node.extra["password"] = password
+
+    pm = _parse_query(parsed.query)
+    if pm.get("username") and "username" not in node.extra:
+        node.extra["username"] = pm["username"]
+    if pm.get("password") and "password" not in node.extra:
+        node.extra["password"] = pm["password"]
+
+    if parsed.scheme.lower() == "https" or _truthy(pm.get("tls", "")) or pm.get("security") == "tls":
+        node.extra["tls"] = True
+    if pm.get("sni"):
+        node.extra["sni"] = pm["sni"]
+    if _truthy(pm.get("skip-cert-verify", "")) or _truthy(pm.get("allowInsecure", "")):
+        node.extra["skip-cert-verify"] = True
+
+    if not node.name:
+        node.name = f"{node.server}:{node.port}"
+    return node if _is_valid(node) else None
+
+
+def _parse_socks5(uri: str) -> ProxyNode | None:
+    """Parse socks5://, socks5h://, or socks:// proxy URI."""
+    parsed = urlparse(uri)
+    node = ProxyNode(id=generate_id(), type="socks5", enabled=True)
+    node.name = unquote(parsed.fragment) if parsed.fragment else ""
+
+    hp = _parsed_host_port(parsed)
+    if hp is None:
+        return None
+    node.server, node.port = hp
+
+    username = unquote(parsed.username or "")
+    password = unquote(parsed.password or "")
+    if username:
+        node.extra["username"] = username
+    if password:
+        node.extra["password"] = password
+
+    pm = _parse_query(parsed.query)
+    if pm.get("username") and "username" not in node.extra:
+        node.extra["username"] = pm["username"]
+    if pm.get("password") and "password" not in node.extra:
+        node.extra["password"] = pm["password"]
+    if _truthy(pm.get("udp", "")):
+        node.extra["udp"] = True
+    if parsed.scheme.lower() == "socks5h" or _truthy(pm.get("remote-dns", "")):
+        node.extra["remote-dns"] = True
+
+    if not node.name:
+        node.name = f"{node.server}:{node.port}"
+    return node if _is_valid(node) else None
+
+
 # ── Yaml proxy helper ──────────────────────────────────────────────────────
 
 def _yaml_node_to_proxy(m: dict[str, Any]) -> ProxyNode | None:
@@ -290,6 +375,11 @@ def _yaml_node_to_proxy(m: dict[str, Any]) -> ProxyNode | None:
 # ── Public API ─────────────────────────────────────────────────────────────
 
 _SCHEME_PARSERS = {
+    "http://": _parse_http,
+    "https://": _parse_http,
+    "socks5://": _parse_socks5,
+    "socks5h://": _parse_socks5,
+    "socks://": _parse_socks5,
     "ss://": _parse_ss,
     "vmess://": _parse_vmess,
     "vless://": _parse_vless,

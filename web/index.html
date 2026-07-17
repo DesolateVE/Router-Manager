@@ -3,21 +3,28 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mihomo Helper</title>
+<title>Router Manager</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
 <header class="topbar">
-  <div class="logo"><span>Mihomo</span> Helper</div>
+  <div class="logo"><span>Router</span> Manager</div>
   <span id="statusText" class="topbar-status"><span class="status-dot off"></span>已停止</span>
   <div class="topbar-actions">
     <button class="btn btn-success btn-sm" id="btnStart" onclick="controlMihomo('start')">启动</button>
     <button class="btn btn-danger btn-sm" id="btnStop" onclick="controlMihomo('stop')" style="display:none">停止</button>
-    <button class="btn btn-sm" onclick="controlMihomo('restart')">重启</button>
-    <button class="btn btn-sm" id="btnReload" onclick="reloadConfig()">重载配置</button>
+    <button class="btn btn-warning btn-sm" onclick="controlMihomo('restart')">重启</button>
+    <button class="btn btn-success btn-sm" id="btnReload" onclick="reloadConfig()">↻ 重载配置</button>
   </div>
 </header>
+
+<div class="config-dirty-banner" id="configDirtyBanner" style="display:none">
+  <div class="config-dirty-copy">
+    <strong>配置已更新</strong>
+    <span>你刚刚修改了 Mihomo 配置，需重载配置或重启后才会正式生效。</span>
+  </div>
+</div>
 
 <div class="app-body">
 
@@ -44,6 +51,10 @@
       <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="11" rx="5"/><line x1="6" y1="12" x2="10" y2="12"/><line x1="8" y1="10" x2="8" y2="14"/><circle cx="16" cy="10.5" r="1" fill="currentColor" stroke="none"/><circle cx="18" cy="12.5" r="1" fill="currentColor" stroke="none"/><circle cx="16" cy="14.5" r="1" fill="currentColor" stroke="none"/><circle cx="14" cy="12.5" r="1" fill="currentColor" stroke="none"/></svg></span>
       <span class="nav-label">Xbox 代理</span>
     </div>
+    <div class="nav-item" data-tab="tunnels">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h5l2 3h9"/><path d="M20 17h-5l-2-3H4"/><circle cx="6" cy="7" r="1.5" fill="currentColor" stroke="none"/><circle cx="18" cy="17" r="1.5" fill="currentColor" stroke="none"/></svg></span>
+      <span class="nav-label">流量隧道</span>
+    </div>
     <div class="nav-item" data-tab="settings">
       <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06-.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
       <span class="nav-label">设置</span>
@@ -60,10 +71,23 @@
 
 <!-- ═══ Dashboard ═══ -->
 <div class="panel active" id="panel-dashboard">
+  <div class="dashboard-hero card">
+    <div>
+      <div class="dashboard-kicker">Router Manager</div>
+      <h1 class="dashboard-title">路由与代理总览</h1>
+      <p class="dashboard-subtitle">保留核心状态信息，复杂调试和连接细节交给 MetaCubeXD 仪表盘。</p>
+    </div>
+    <div class="dashboard-actions">
+      <a class="btn btn-primary" href="/metacubexd-entry" target="_blank" rel="noopener noreferrer">打开 MetaCubeXD</a>
+      <button class="btn" onclick="openConfigPreview()">查看配置预览</button>
+    </div>
+  </div>
   <div class="stats-grid">
+    <div class="stat-card runtime"><div class="stat-value" id="statRuntime">离线</div><div class="stat-label">核心状态</div></div>
+    <div class="stat-card mode"><div class="stat-value" id="statMode">--</div><div class="stat-label">运行模式</div></div>
+    <div class="stat-card controller"><div class="stat-value" id="statController">--</div><div class="stat-label">控制端口</div></div>
     <div class="stat-card speed-dl"><div class="stat-value" id="statDlSpeed">-- B/s</div><div class="stat-label">下行速度</div></div>
     <div class="stat-card speed-ul"><div class="stat-value" id="statUlSpeed">-- B/s</div><div class="stat-label">上行速度</div></div>
-    <div class="stat-card connections"><div class="stat-value" id="statConns">--</div><div class="stat-label">活跃连接</div></div>
     <div class="stat-card memory"><div class="stat-value" id="statMemory">--</div><div class="stat-label">内存占用</div></div>
     <div class="stat-card traffic-down"><div class="stat-value" id="statDownload">--</div><div class="stat-label">累计下载</div></div>
     <div class="stat-card traffic-up"><div class="stat-value" id="statUpload">--</div><div class="stat-label">累计上传</div></div>
@@ -71,19 +95,23 @@
     <div class="stat-card"><div class="stat-value" id="statGroups">0</div><div class="stat-label">策略组</div></div>
     <div class="stat-card"><div class="stat-value" id="statRules">0</div><div class="stat-label">路由规则</div></div>
   </div>
-  <div class="card">
+  <div class="card dashboard-summary-card">
     <div class="card-header">
-      <span class="card-title">活跃连接</span>
-      <div class="btn-group">
-        <input id="connSearch" style="width:180px" placeholder="搜索主机、代理链..." oninput="renderConnTable()">
-        <button class="btn btn-sm btn-danger" onclick="closeAllConns()">关闭全部</button>
-      </div>
+      <span class="card-title">管理建议</span>
     </div>
-    <div class="conn-table-wrap">
-      <table class="conn-table">
-        <thead><tr><th>目标主机</th><th>协议</th><th>代理链</th><th>↓ 速度</th><th>↑ 速度</th><th>↓ 总量</th><th>↑ 总量</th><th>时长</th><th></th></tr></thead>
-        <tbody id="connTableBody"></tbody>
-      </table>
+    <div class="dashboard-summary-grid">
+      <div class="summary-item">
+        <div class="summary-label">适用场景</div>
+        <div class="summary-value">日常查看服务状态、模式与总体流量</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-label">详细调试</div>
+        <div class="summary-value">打开 MetaCubeXD 查看连接、规则命中与实时日志</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-label">配置变更</div>
+        <div class="summary-value">在当前面板维护节点、策略组、规则，再按需重载配置</div>
+      </div>
     </div>
   </div>
 </div>
@@ -195,6 +223,20 @@
   </div>
 </div>
 
+<!-- ═══ Tunnels ═══ -->
+<div class="panel" id="panel-tunnels">
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <span class="card-title">流量隧道</span>
+        <div style="font-size:12px;color:var(--text2);margin-top:2px">将本地监听地址转发到目标地址，可选择经过代理或策略组。</div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="showAddTunnelModal()">添加隧道</button>
+    </div>
+    <div class="proxy-list" id="tunnelList"></div>
+  </div>
+</div>
+
 </div><!-- main-content -->
 </div><!-- app-body -->
 
@@ -206,7 +248,7 @@
       <label>导入方式</label>
       <select id="importType" onchange="toggleImportFields()">
         <option value="yaml">YAML 代理配置（单条或多条）</option>
-        <option value="uri">单条 URI (ss/vmess/vless/trojan/hy2)</option>
+        <option value="uri">单条 URI (ss/vmess/vless/trojan/hy2/http/socks5)</option>
         <option value="text">批量文本 (每行一条 URI 或 Base64)</option>
       </select>
     </div>
@@ -218,7 +260,7 @@
     </div>
     <div class="form-group" id="importUriField" style="display:none">
       <label>代理 URI</label>
-      <input type="text" id="importUri" placeholder="ss://... 或 vmess://... 等">
+      <input type="text" id="importUri" placeholder="ss://...、http://user:pass@host:port 或 socks5://host:port">
     </div>
     <div class="form-group" id="importTextField" style="display:none">
       <label>粘贴文本内容</label>
@@ -252,10 +294,13 @@
       <div class="form-group"><label>服务器</label><input type="text" id="pServer" placeholder="server.example.com"></div>
       <div class="form-group"><label>端口</label><input type="number" id="pPort" placeholder="443"></div>
     </div>
-    <div class="form-group"><label>链式代理 (dialer-proxy)</label>
-      <select id="pDialerProxy">
-        <option value="">不使用链式代理</option>
-      </select>
+    <div class="form-group"><label>前置代理 (dialer-proxy)</label>
+      <div class="inline-control">
+        <select id="pDialerProxy">
+          <option value="">直连</option>
+        </select>
+        <button type="button" class="btn" onclick="clearDialerProxy()">直连</button>
+      </div>
     </div>
     <div class="form-group"><label>扩展参数 (JSON)</label><textarea id="pExtra" rows="6" placeholder='{"password":"xxx","cipher":"aes-256-gcm"}'></textarea></div>
     <div class="btn-group" style="justify-content:flex-end">
@@ -341,6 +386,16 @@
       <label id="rPayloadLabel">匹配内容</label>
       <input type="text" id="rPayload" placeholder="google.com / CN / 8.8.8.0/24 等">
     </div>
+    <div class="form-row" id="rPayloadMaskRow" style="display:none">
+      <div class="form-group">
+        <label id="rPayloadIpLabel">IP 地址</label>
+        <input type="text" id="rPayloadIp" placeholder="192.168.1.100">
+      </div>
+      <div class="form-group">
+        <label>掩码</label>
+        <input type="number" id="rPayloadMask" placeholder="32" min="0" max="128">
+      </div>
+    </div>
     <div class="form-row" id="rSubRuleCondRow" style="display:none">
       <div class="form-group">
         <label>条件类型</label>
@@ -362,6 +417,16 @@
       <div class="form-group">
         <label>条件值</label>
         <input type="text" id="rCondPayload" placeholder="tcp / udp / CN / example.com 等">
+        <div class="form-row" id="rCondPayloadMaskRow" style="display:none;margin-top:8px">
+          <div class="form-group" style="margin-bottom:0">
+            <label id="rCondPayloadIpLabel">IP 地址</label>
+            <input type="text" id="rCondPayloadIp" placeholder="192.168.1.100">
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label>掩码</label>
+            <input type="number" id="rCondPayloadMask" placeholder="32" min="0" max="128">
+          </div>
+        </div>
         <select id="rCondPayloadSel" style="display:none">
           <option value="tcp">tcp</option>
           <option value="udp">udp</option>
@@ -519,6 +584,31 @@
     <div class="btn-group" style="justify-content:flex-end">
       <button class="btn" onclick="closeModal('bindingModal')">取消</button>
       <button class="btn btn-primary" onclick="saveBinding()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Tunnel Modal ═══ -->
+<div class="modal-overlay" id="tunnelModal">
+  <div class="modal">
+    <h3 id="tunnelModalTitle">添加流量隧道</h3>
+    <input type="hidden" id="tunnelEditId">
+    <div class="form-group"><label>名称（备注）</label><input type="text" id="tLabel" placeholder="DNS 转发 / 游戏服务器"></div>
+    <div class="form-group">
+      <label>网络类型</label>
+      <div class="network-checks">
+        <label><input type="checkbox" id="tNetTcp" checked> TCP</label>
+        <label><input type="checkbox" id="tNetUdp"> UDP</label>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>本地监听</label><input type="text" id="tAddress" placeholder="127.0.0.1:6553"></div>
+      <div class="form-group"><label>目标地址</label><input type="text" id="tTarget" placeholder="8.8.8.8:53"></div>
+    </div>
+    <div class="form-group"><label>经过代理 / 策略组（可选）</label><select id="tProxy"></select></div>
+    <div class="btn-group" style="justify-content:flex-end">
+      <button class="btn" onclick="closeModal('tunnelModal')">取消</button>
+      <button class="btn btn-primary" onclick="saveTunnel()">保存</button>
     </div>
   </div>
 </div>

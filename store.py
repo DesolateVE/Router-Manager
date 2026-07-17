@@ -6,7 +6,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from models import AppSettings, AppState, DeviceBinding, ProxyGroup, ProxyNode, Rule, RuleProvider, SubRuleEntry, generate_id
+from models import AppSettings, AppState, DeviceBinding, ProxyGroup, ProxyNode, Rule, RuleProvider, SubRuleEntry, TunnelEntry, generate_id
 
 
 class Store:
@@ -295,6 +295,41 @@ class Store:
             before = len(self._state.device_bindings)
             self._state.device_bindings = [b for b in self._state.device_bindings if b.id != bid]
             if len(self._state.device_bindings) == before:
+                return False
+            self._save_unlocked()
+            return True
+
+    # ── Tunnels ───────────────────────────────────────────────────────────
+
+    def get_tunnels(self) -> list[TunnelEntry]:
+        with self._lock:
+            return list(self._state.tunnels)
+
+    def add_tunnel(self, tunnel: TunnelEntry) -> None:
+        with self._lock:
+            if not tunnel.id:
+                tunnel.id = generate_id()
+            self._state.tunnels.append(tunnel)
+            self._save_unlocked()
+
+    def update_tunnel(self, tunnel_id: str, patch: dict[str, Any]) -> bool:
+        with self._lock:
+            tunnel = next((x for x in self._state.tunnels if x.id == tunnel_id), None)
+            if tunnel is None:
+                return False
+            for field in ("label", "address", "target", "proxy", "enabled"):
+                if field in patch:
+                    setattr(tunnel, field, patch[field])
+            if "network" in patch:
+                tunnel.network = list(patch["network"])
+            self._save_unlocked()
+            return True
+
+    def delete_tunnel(self, tunnel_id: str) -> bool:
+        with self._lock:
+            before = len(self._state.tunnels)
+            self._state.tunnels = [t for t in self._state.tunnels if t.id != tunnel_id]
+            if len(self._state.tunnels) == before:
                 return False
             self._save_unlocked()
             return True

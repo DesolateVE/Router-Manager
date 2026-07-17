@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Deploy mihomo_helper to OpenWrt via SSH.
+Deploy Router Manager to OpenWrt via SSH.
 
 Examples:
   python deploy.py --host 10.0.8.84 --user root
@@ -21,14 +21,18 @@ from typing import List, Optional
 
 DEFAULT_HOST = "10.0.8.84"
 DEFAULT_USER = "root"
-DEFAULT_TARGET_DIR = "/opt/mihomo_helper"
-DEFAULT_DATA_DIR = "/etc/mihomo_helper"
+SERVICE_NAME = "router_manager"
+LEGACY_SERVICE_NAME = "mihomo_helper"
+DEFAULT_TARGET_DIR = "/opt/router_manager"
+DEFAULT_DATA_DIR = "/etc/router_manager"
+LEGACY_TARGET_DIR = "/opt/mihomo_helper"
+LEGACY_DATA_DIR = "/etc/mihomo_helper"
 DEFAULT_SERVICE_PORT = "8080"
 
 ROOT = Path(__file__).resolve().parent
-INIT_TEMPLATE = ROOT / "mihomo_helper.init"
+INIT_TEMPLATE = ROOT / "router_manager.init"
 BUILD_DIR = ROOT / ".deploy"
-BUILD_INIT_SCRIPT = BUILD_DIR / "mihomo_helper"
+BUILD_INIT_SCRIPT = BUILD_DIR / SERVICE_NAME
 
 
 def log(message: str) -> None:
@@ -178,6 +182,12 @@ class Deployer:
         log(f"Connecting to {self.user}@{self.host} ...")
         self.client.ssh("uname -a")
 
+        log("Stopping existing services before update ...")
+        self.client.ssh(
+            f"if [ -x /etc/init.d/{shell_quote(SERVICE_NAME)[1:-1]} ]; then /etc/init.d/{SERVICE_NAME} stop || true; fi; "
+            f"if [ -x /etc/init.d/{LEGACY_SERVICE_NAME} ]; then /etc/init.d/{LEGACY_SERVICE_NAME} stop || true; fi"
+        )
+
         log(f"Creating remote directories: {self.target_dir}  {self.data_dir}")
         self.client.ssh(
             "mkdir -p "
@@ -185,6 +195,8 @@ class Deployer:
             f"{shell_quote(self.target_dir + '/web')} "
             f"{shell_quote(self.data_dir)}"
         )
+
+        self._migrate_legacy_data_dir()
 
         log("Uploading Python source files ...")
         self.client.upload_files(
@@ -215,6 +227,12 @@ class Deployer:
                 log(f"  -> {source.relative_to(ROOT).as_posix()}")
                 self.client.upload_files([source], self.data_dir)
 
+        log("Installing Python dependencies on target ...")
+        self.client.ssh(
+            "python3 -m pip install --no-input -r "
+            f"{shell_quote(self.target_dir + '/requirements.txt')}"
+        )
+
         log("Setting execute permission on resource executables ...")
         self.client.ssh(
             "chmod +x "
@@ -224,25 +242,56 @@ class Deployer:
             "2>/dev/null; true"
         )
 
-        log("Writing /etc/init.d/mihomo_helper ...")
+        log(f"Writing /etc/init.d/{SERVICE_NAME} ...")
         init_script = self.render_init_script()
-        self.client.upload_file_to_path(init_script, "/etc/init.d/mihomo_helper")
-        self.client.ssh("chmod +x /etc/init.d/mihomo_helper")
+        self.client.upload_file_to_path(init_script, f"/etc/init.d/{SERVICE_NAME}")
+        self.client.ssh(f"chmod +x /etc/init.d/{SERVICE_NAME}")
+
+        log("Disabling legacy service name if present ...")
+        self.client.ssh(
+            f"if [ -x /etc/init.d/{LEGACY_SERVICE_NAME} ]; then "
+            f"/etc/init.d/{LEGACY_SERVICE_NAME} disable || true; rm -f /etc/init.d/{LEGACY_SERVICE_NAME}; fi"
+        )
 
         log("Enabling service (auto-start on boot) ...")
-        self.client.ssh("/etc/init.d/mihomo_helper enable")
+        self.client.ssh(f"/etc/init.d/{SERVICE_NAME} enable")
 
         log("Starting service ...")
-        self.client.ssh("/etc/init.d/mihomo_helper start")
+        self.client.ssh(f"/etc/init.d/{SERVICE_NAME} start")
 
         time.sleep(2)
         try:
-            status = self.client.ssh_capture("/etc/init.d/mihomo_helper status")
+            status = self.client.ssh_capture(f"/etc/init.d/{SERVICE_NAME} status")
         except subprocess.CalledProcessError:
             status = "unknown"
         log(f"Service status: {status}")
 
         log(f"Done! Web UI:  http://{self.host}:{self.service_port}")
+
+    def _migrate_legacy_data_dir(self) -> None:
+        if self.data_dir == LEGACY_DATA_DIR:
+            return
+        log("Migrating legacy data directory if needed ...")
+        self.client.ssh(
+            "python3 - <<'PY'\n"
+            "from pathlib import Path\n"
+            "import json\n"
+            f"legacy = Path({LEGACY_DATA_DIR!r})\n"
+            f"target = Path({self.data_dir!r})\n"
+            "target.mkdir(parents=True, exist_ok=True)\n"
+            "legacy_data = legacy / 'data.json'\n"
+            "target_data = target / 'data.json'\n"
+            "if legacy_data.exists() and not target_data.exists():\n"
+            "    data = json.loads(legacy_data.read_text(encoding='utf-8'))\n"
+            "    settings = data.get('settings', {})\n"
+            f"    if settings.get('data_dir') == {LEGACY_DATA_DIR!r}:\n"
+            f"        settings['data_dir'] = {self.data_dir!r}\n"
+            f"    if settings.get('mihomo_bin') == {LEGACY_DATA_DIR + '/mihomo'!r}:\n"
+            f"        settings['mihomo_bin'] = {self.data_dir + '/mihomo'!r}\n"
+            "    data['settings'] = settings\n"
+            "    target_data.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')\n"
+            "PY"
+        )
 
     def render_init_script(self) -> Path:
         template = INIT_TEMPLATE.read_text(encoding="utf-8")
@@ -258,7 +307,7 @@ class Deployer:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Deploy mihomo_helper to OpenWrt via SSH.")
+    parser = argparse.ArgumentParser(description="Deploy Router Manager to OpenWrt via SSH.")
     parser.add_argument("--host", "--ip", dest="host", default=DEFAULT_HOST, help=f"OpenWrt IP/host, default: {DEFAULT_HOST}")
     parser.add_argument("--user", "--username", dest="user", default=DEFAULT_USER, help=f"SSH username, default: {DEFAULT_USER}")
     parser.add_argument("--password", "-p", help="SSH password. If omitted, SSH uses your local key/agent.")

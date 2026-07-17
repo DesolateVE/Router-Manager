@@ -1,11 +1,13 @@
 const API = '';
 let proxies = [], groups = [], rules = [], settings = {};
 let bindings = [];
+let tunnels = [];
 let subRuleSets = {};  // dict: set_name -> [SubRuleEntry]
 let ruleProviders = {};  // dict: name -> RuleProvider
 let proxyLatency = {};  // id -> ms (null=testing, -1=error)
 let _connWs = null, _connData = [], _connPrev = null, _connPrevTime = 0, _connPrevMap = {};
 let _connWsStopped = false;
+const CONFIG_DIRTY_KEY = 'routerManagerConfigDirty';
 
 // Rule modal context:
 // null = main rule,  string = adding new entry to that set,  {setName, idx} = editing entry
@@ -25,8 +27,48 @@ function toast(msg, type = 'success') {
   _toastTimer = setTimeout(() => { t.className = 'toast'; _toastTimer = null; }, 2500);
 }
 
+function renderConfigDirtyBanner() {
+  const banner = document.getElementById('configDirtyBanner');
+  const reloadBtn = document.getElementById('btnReload');
+  if (!banner || !reloadBtn) return;
+  const isDirty = localStorage.getItem(CONFIG_DIRTY_KEY) === '1';
+  banner.style.display = isDirty ? 'flex' : 'none';
+  reloadBtn.classList.toggle('btn-attention', isDirty);
+}
+
+function markConfigDirty() {
+  localStorage.setItem(CONFIG_DIRTY_KEY, '1');
+  renderConfigDirtyBanner();
+}
+
+function clearConfigDirty() {
+  localStorage.removeItem(CONFIG_DIRTY_KEY);
+  renderConfigDirtyBanner();
+}
+
+function shouldMarkConfigDirty(path, method) {
+  if (!['POST', 'PUT', 'DELETE'].includes(method)) return false;
+  return [
+    '/api/settings',
+    '/api/proxies',
+    '/api/groups',
+    '/api/rules',
+    '/api/sub-rules',
+    '/api/rule-providers',
+    '/api/import/',
+    '/api/device-bindings',
+    '/api/tunnels'
+  ].some(prefix => path.startsWith(prefix));
+}
+
+function shouldClearConfigDirty(path, method) {
+  if (method !== 'POST') return false;
+  return path === '/api/reload' || path === '/api/start' || path === '/api/restart';
+}
+
 // ── API helpers ──
 async function api(path, opts = {}) {
+  const method = (opts.method || 'GET').toUpperCase();
   const res = await fetch(API + path, {
     headers: { 'Content-Type': 'application/json' },
     ...opts,
@@ -37,26 +79,36 @@ async function api(path, opts = {}) {
     try { const j = await res.json(); detail = j.detail || detail; } catch (_) {}
     throw new Error(detail);
   }
+  if (shouldClearConfigDirty(path, method)) clearConfigDirty();
+  else if (shouldMarkConfigDirty(path, method)) markConfigDirty();
   return res.json();
 }
 
 // ── Tab switching ──
 let _logPollTimer = null;
+function activateTab(tabName) {
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  const tab = document.querySelector('.nav-item[data-tab="' + tabName + '"]');
+  const panel = document.getElementById('panel-' + tabName);
+  if (tab) tab.classList.add('active');
+  if (panel) panel.classList.add('active');
+  if (tabName === 'logs') {
+    refreshLogs();
+    if (_logPollTimer) clearInterval(_logPollTimer);
+    _logPollTimer = setInterval(refreshLogs, 2000);
+  } else if (_logPollTimer) {
+    clearInterval(_logPollTimer);
+    _logPollTimer = null;
+  }
+  if (tabName === 'dashboard') {
+    renderDashboardSummary();
+  }
+}
+
 document.querySelectorAll('.nav-item').forEach(item => {
   item.addEventListener('click', () => {
-    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-    item.classList.add('active');
-    document.getElementById('panel-' + item.dataset.tab).classList.add('active');
-    if (item.dataset.tab === 'logs') {
-      refreshLogs();
-      _logPollTimer = setInterval(refreshLogs, 2000);
-    } else {
-      if (_logPollTimer) { clearInterval(_logPollTimer); _logPollTimer = null; }
-    }
-    if (item.dataset.tab === 'dashboard') {
-      renderConnTable();
-    }
+    activateTab(item.dataset.tab);
   });
 });
 
@@ -126,12 +178,27 @@ function _doConnWs() {
 
 function updateDashboardStats(data, dlSpeed, ulSpeed) {
   const el = (id) => document.getElementById(id);
-  if (el('statConns'))    el('statConns').textContent    = (data.connections || []).length;
   if (el('statDownload')) el('statDownload').textContent = formatBytes(data.downloadTotal);
   if (el('statUpload'))   el('statUpload').textContent   = formatBytes(data.uploadTotal);
   if (el('statDlSpeed'))  el('statDlSpeed').textContent  = formatSpeed(dlSpeed);
   if (el('statUlSpeed'))  el('statUlSpeed').textContent  = formatSpeed(ulSpeed);
   if (el('statMemory'))   el('statMemory').textContent   = formatBytes(data.memory);
+}
+
+function renderDashboardSummary() {
+  const modeMap = { rule: '规则', global: '全局', direct: '直连' };
+  const runtimeEl = document.getElementById('statRuntime');
+  const modeEl = document.getElementById('statMode');
+  const controllerEl = document.getElementById('statController');
+  if (runtimeEl) {
+    runtimeEl.textContent = _connWsStopped ? '离线' : (document.getElementById('btnStop').style.display === 'none' ? '离线' : '在线');
+  }
+  if (modeEl) {
+    modeEl.textContent = modeMap[settings.mode] || settings.mode || '--';
+  }
+  if (controllerEl) {
+    controllerEl.textContent = settings.mihomo_api_port ? ':' + settings.mihomo_api_port : '--';
+  }
 }
 
 function formatSpeed(bps) {
@@ -149,39 +216,6 @@ function elapsedTime(startIso) {
   return Math.floor(sec / 3600) + 'h' + Math.floor((sec % 3600) / 60) + 'm';
 }
 
-function renderConnTable() {
-  const tbody = document.getElementById('connTableBody');
-  if (!tbody) return;
-  const q = ((document.getElementById('connSearch') || {}).value || '').toLowerCase();
-  const rows = _connData.filter(c => {
-    if (!q) return true;
-    const host = (c.metadata && (c.metadata.host || c.metadata.destinationIP)) || '';
-    const chains = (c.chains || []).join(' ');
-    return host.toLowerCase().includes(q) || chains.toLowerCase().includes(q);
-  });
-  tbody.innerHTML = rows.map(c => {
-    const meta = c.metadata || {};
-    const host = meta.host || meta.destinationIP || '?';
-    const port = meta.destinationPort || '';
-    const target = host + (port ? ':' + port : '');
-    const net = (meta.network || '').toUpperCase();
-    const chains = (c.chains || []).slice().reverse().join(' › ');
-    const dlS = c._dlSpeed != null ? formatSpeed(c._dlSpeed) : '--';
-    const ulS = c._ulSpeed != null ? formatSpeed(c._ulSpeed) : '--';
-    return '<tr>' +
-      '<td class="conn-host" title="' + esc(target) + '">' + esc(target) + '</td>' +
-      '<td><span class="net-badge net-' + esc(net.toLowerCase()) + '">' + esc(net) + '</span></td>' +
-      '<td class="conn-chains">' + esc(chains) + '</td>' +
-      '<td class="speed-dl">' + dlS + '</td>' +
-      '<td class="speed-ul">' + ulS + '</td>' +
-      '<td>' + formatBytes(c.download) + '</td>' +
-      '<td>' + formatBytes(c.upload) + '</td>' +
-      '<td>' + elapsedTime(c.start) + '</td>' +
-      '<td><button class="btn btn-sm btn-danger" onclick="closeConn(\'' + esc(c.id) + '\')">&#215;</button></td>' +
-      '</tr>';
-  }).join('');
-}
-
 async function closeConn(id) {
   try { await api('/api/connections/' + encodeURIComponent(id), { method: 'DELETE' }); }
   catch (e) { toast('关闭失败: ' + e.message, 'error'); }
@@ -197,9 +231,11 @@ async function refreshStatus() {
   try {
     const s = await api('/api/status');
     const running = s.mihomo_running;
+    const runtimeEl = document.getElementById('statRuntime');
     document.getElementById('statusText').innerHTML = running
       ? '<span class="status-dot on"></span>运行中 (PID: ' + s.mihomo_pid + ')'
       : '<span class="status-dot off"></span>已停止';
+    if (runtimeEl) runtimeEl.textContent = running ? '在线' : '离线';
     document.getElementById('btnStart').style.display = running ? 'none' : '';
     document.getElementById('btnStop').style.display = running ? '' : 'none';
   } catch (e) { console.error(e); }
@@ -218,16 +254,18 @@ async function controlMihomo(action) {
 // ── Load data ──
 async function loadAll() {
   try {
-    [proxies, groups, rules, settings, subRuleSets, ruleProviders, bindings] = await Promise.all([
+    [proxies, groups, rules, settings, subRuleSets, ruleProviders, bindings, tunnels] = await Promise.all([
       api('/api/proxies'), api('/api/groups'), api('/api/rules'),
       api('/api/settings'), api('/api/sub-rules'), api('/api/rule-providers'),
-      api('/api/device-bindings')
+      api('/api/device-bindings'), api('/api/tunnels')
     ]);
     renderProxies();
     renderGroups();
     renderRules();
     renderBindings();
+    renderTunnels();
     loadSettingsUI();
+    renderDashboardSummary();
     document.getElementById('statProxies').textContent = proxies.length;
     document.getElementById('statGroups').textContent = groups.length;
     document.getElementById('statRules').textContent = rules.length;
@@ -242,6 +280,13 @@ async function loadPreview() {
     const res = await fetch(API + '/api/config/preview');
     document.getElementById('yamlPreview').textContent = await res.text();
   } catch (e) { toast('加载失败', 'error'); }
+}
+
+async function openConfigPreview() {
+  activateTab('settings');
+  await loadPreview();
+  const preview = document.getElementById('yamlPreview');
+  if (preview) preview.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 // ── Proxies ──
@@ -277,7 +322,7 @@ function renderProxies() {
 
 function _fillDialerProxySelect(excludeId, selectedName) {
   const sel = document.getElementById('pDialerProxy');
-  sel.innerHTML = '<option value="">不使用链式代理</option>';
+  sel.innerHTML = '<option value="">直连</option>';
   proxies.filter(p => p.id !== excludeId).forEach(p => {
     const name = p.alias || p.name;
     const opt = document.createElement('option');
@@ -286,6 +331,16 @@ function _fillDialerProxySelect(excludeId, selectedName) {
     if (name === selectedName) opt.selected = true;
     sel.appendChild(opt);
   });
+}
+
+function _extraWithoutDialerProxy(extra) {
+  const cleaned = { ...(extra || {}) };
+  delete cleaned['dialer-proxy'];
+  return cleaned;
+}
+
+function clearDialerProxy() {
+  document.getElementById('pDialerProxy').value = '';
 }
 
 function showAddProxyModal() {
@@ -310,7 +365,7 @@ function editProxy(id) {
   document.getElementById('pPort').value = p.port;
   document.getElementById('pEnabled').checked = p.enabled;
   _fillDialerProxySelect(p.id, (p.extra && p.extra['dialer-proxy']) || '');
-  document.getElementById('pExtra').value = JSON.stringify(p.extra || {}, null, 2);
+  document.getElementById('pExtra').value = JSON.stringify(_extraWithoutDialerProxy(p.extra), null, 2);
   showModal('proxyModal');
 }
 
@@ -583,12 +638,79 @@ function updateRuleSetOptions() {
   if (names.includes(current)) sel.value = current;
 }
 
+function isCidrRuleType(type) {
+  return type === 'IP-CIDR' || type === 'IP-CIDR6' || type === 'SRC-IP-CIDR';
+}
+
+function maskMaxByType(type) {
+  return type === 'IP-CIDR6' ? 128 : 32;
+}
+
+function defaultMaskByType(type) {
+  if (type === 'IP-CIDR6') return 128;
+  if (type === 'SRC-IP-CIDR') return 32;
+  return 24;
+}
+
+function setMaskInputValue(inputId, maxMask, selectedMask) {
+  const input = document.getElementById(inputId);
+  const val = Number.isInteger(selectedMask) ? selectedMask : maxMask;
+  input.value = String(Math.min(maxMask, Math.max(0, val)));
+}
+
+function parseCidrPayload(raw, type) {
+  const input = (raw || '').trim();
+  if (!input) {
+    return { ip: '', mask: defaultMaskByType(type) };
+  }
+  const slash = input.lastIndexOf('/');
+  if (slash <= 0 || slash === input.length - 1) {
+    return { ip: input, mask: defaultMaskByType(type) };
+  }
+  const ip = input.slice(0, slash).trim();
+  const parsedMask = parseInt(input.slice(slash + 1).trim(), 10);
+  if (!Number.isFinite(parsedMask)) {
+    return { ip: input, mask: defaultMaskByType(type) };
+  }
+  const max = maskMaxByType(type);
+  return { ip, mask: Math.min(max, Math.max(0, parsedMask)) };
+}
+
+function composeCidrPayload(ip, mask, type) {
+  const rawIp = (ip || '').trim();
+  if (!rawIp) return '';
+  const max = maskMaxByType(type);
+  const parsed = parseInt(mask, 10);
+  const normalized = Number.isFinite(parsed) ? Math.min(max, Math.max(0, parsed)) : defaultMaskByType(type);
+  return rawIp + '/' + normalized;
+}
+
+function syncMainCidrFields() {
+  const type = document.getElementById('rType').value;
+  const parsed = parseCidrPayload(document.getElementById('rPayload').value, type);
+  document.getElementById('rPayloadIp').value = parsed.ip;
+  document.getElementById('rPayloadMask').max = String(maskMaxByType(type));
+  setMaskInputValue('rPayloadMask', maskMaxByType(type), parsed.mask);
+  document.getElementById('rPayloadIpLabel').textContent = type === 'IP-CIDR6' ? 'IPv6 地址' : 'IP 地址';
+}
+
+function syncCondCidrFields() {
+  const condType = document.getElementById('rCondType').value;
+  const parsed = parseCidrPayload(document.getElementById('rCondPayload').value, condType);
+  document.getElementById('rCondPayloadIp').value = parsed.ip;
+  document.getElementById('rCondPayloadMask').max = String(maskMaxByType(condType));
+  setMaskInputValue('rCondPayloadMask', maskMaxByType(condType), parsed.mask);
+  document.getElementById('rCondPayloadIpLabel').textContent = condType === 'IP-CIDR6' ? 'IPv6 地址' : 'IP 地址';
+}
+
 function onRuleTypeChange() {
   const type = document.getElementById('rType').value;
   const isSubRule = type === 'SUB-RULE';
   const isMatch = type === 'MATCH';
   const isRuleSet = type === 'RULE-SET';
-  document.getElementById('rPayloadField').style.display = (isMatch || isSubRule || isRuleSet) ? 'none' : '';
+  const useCidrMask = isCidrRuleType(type) && !isSubRule && !isMatch && !isRuleSet;
+  document.getElementById('rPayloadField').style.display = (isMatch || isSubRule || isRuleSet || useCidrMask) ? 'none' : '';
+  document.getElementById('rPayloadMaskRow').style.display = useCidrMask ? 'grid' : 'none';
   document.getElementById('rTargetField').style.display = isSubRule ? 'none' : '';
   document.getElementById('rSubRuleCondRow').style.display = isSubRule ? '' : 'none';
   document.getElementById('rSubRuleSetRow').style.display = isSubRule ? '' : 'none';
@@ -633,6 +755,10 @@ function onRuleTypeChange() {
   document.getElementById('rPayloadLabel').textContent = h.label;
   document.getElementById('rPayload').placeholder = h.ph;
 
+  if (useCidrMask) {
+    syncMainCidrFields();
+  }
+
   onCondTypeChange();
 }
 document.getElementById('rType').addEventListener('change', onRuleTypeChange);
@@ -640,7 +766,9 @@ document.getElementById('rType').addEventListener('change', onRuleTypeChange);
 function onCondTypeChange() {
   const condType = document.getElementById('rCondType').value;
   const isNetwork = condType === 'NETWORK';
-  document.getElementById('rCondPayload').style.display = isNetwork ? 'none' : '';
+  const useCidrMask = isCidrRuleType(condType);
+  document.getElementById('rCondPayload').style.display = (isNetwork || useCidrMask) ? 'none' : '';
+  document.getElementById('rCondPayloadMaskRow').style.display = (!isNetwork && useCidrMask) ? 'grid' : 'none';
   document.getElementById('rCondPayloadSel').style.display = isNetwork ? '' : 'none';
   const condHints = {
     'DOMAIN': 'google.com', 'DOMAIN-SUFFIX': 'google.com', 'DOMAIN-KEYWORD': 'google',
@@ -649,6 +777,9 @@ function onCondTypeChange() {
     'PROCESS-NAME': 'chrome.exe', 'DST-PORT': '80 或 8080-9090', 'SRC-PORT': '1024-65535',
   };
   document.getElementById('rCondPayload').placeholder = condHints[condType] || '';
+  if (!isNetwork && useCidrMask) {
+    syncCondCidrFields();
+  }
 }
 document.getElementById('rCondType').addEventListener('change', onCondTypeChange);
 
@@ -658,7 +789,11 @@ function showAddRuleModal() {
   document.getElementById('ruleEditId').value = '';
   document.getElementById('rType').value = 'DOMAIN-SUFFIX';
   document.getElementById('rPayload').value = '';
+  document.getElementById('rPayloadIp').value = '';
+  document.getElementById('rPayloadMask').value = '';
   document.getElementById('rCondPayload').value = '';
+  document.getElementById('rCondPayloadIp').value = '';
+  document.getElementById('rCondPayloadMask').value = '';
   document.getElementById('rCondPayloadSel').value = 'tcp';
   document.getElementById('rCondType').value = 'NETWORK';
   document.getElementById('rNoResolve').checked = false;
@@ -696,6 +831,9 @@ function editRule(id) {
       document.getElementById('rCondPayload').value = '';
     } else {
       document.getElementById('rCondPayload').value = condVal;
+      if (isCidrRuleType(condType)) {
+        syncCondCidrFields();
+      }
     }
     document.getElementById('rSubRuleSetName').value = r.target;
   } else if (r.type === 'RULE-SET') {
@@ -704,6 +842,9 @@ function editRule(id) {
     document.getElementById('rRuleSetName').value = r.payload;
   } else {
     document.getElementById('rPayload').value = r.payload;
+    if (isCidrRuleType(r.type)) {
+      syncMainCidrFields();
+    }
     document.getElementById('rTarget').value = r.target;
   }
   onRuleTypeChange();
@@ -720,14 +861,33 @@ async function saveRule() {
     if (!payload) { toast('请选择规则集合', 'error'); return; }
   } else if (type === 'SUB-RULE') {
     const condType = document.getElementById('rCondType').value;
-    const condPayload = condType === 'NETWORK'
-      ? document.getElementById('rCondPayloadSel').value
-      : document.getElementById('rCondPayload').value.trim();
+    let condPayload;
+    if (condType === 'NETWORK') {
+      condPayload = document.getElementById('rCondPayloadSel').value;
+    } else if (isCidrRuleType(condType)) {
+      condPayload = composeCidrPayload(
+        document.getElementById('rCondPayloadIp').value,
+        document.getElementById('rCondPayloadMask').value,
+        condType
+      );
+      if (!condPayload) { toast('请填写条件 IP 地址', 'error'); return; }
+    } else {
+      condPayload = document.getElementById('rCondPayload').value.trim();
+    }
     payload = condType + (condPayload ? ',' + condPayload : '');
     target = document.getElementById('rSubRuleSetName').value;
     if (!target) { toast('请选择目标子规则集', 'error'); return; }
   } else {
-    payload = document.getElementById('rPayload').value;
+    if (isCidrRuleType(type)) {
+      payload = composeCidrPayload(
+        document.getElementById('rPayloadIp').value,
+        document.getElementById('rPayloadMask').value,
+        type
+      );
+      if (!payload) { toast('请填写 IP 地址', 'error'); return; }
+    } else {
+      payload = document.getElementById('rPayload').value;
+    }
     target = document.getElementById('rTarget').value;
   }
   const no_resolve = document.getElementById('rNoResolve').checked;
@@ -979,7 +1139,11 @@ function showAddEntryToSet() {
   document.getElementById('ruleEditId').value = '';
   document.getElementById('rType').value = 'DOMAIN-SUFFIX';
   document.getElementById('rPayload').value = '';
+  document.getElementById('rPayloadIp').value = '';
+  document.getElementById('rPayloadMask').value = '';
   document.getElementById('rCondPayload').value = '';
+  document.getElementById('rCondPayloadIp').value = '';
+  document.getElementById('rCondPayloadMask').value = '';
   document.getElementById('rCondPayloadSel').value = 'tcp';
   document.getElementById('rCondType').value = 'NETWORK';
   document.getElementById('rNoResolve').checked = false;
@@ -1019,6 +1183,9 @@ function editSrEntry(idx) {
       document.getElementById('rCondPayload').value = '';
     } else {
       document.getElementById('rCondPayload').value = condVal;
+      if (isCidrRuleType(condType)) {
+        syncCondCidrFields();
+      }
     }
     document.getElementById('rSubRuleSetName').value = e.target;
     document.getElementById('rPayload').value = '';
@@ -1028,6 +1195,9 @@ function editSrEntry(idx) {
     document.getElementById('rRuleSetName').value = e.payload;
   } else {
     document.getElementById('rPayload').value = e.payload;
+    if (isCidrRuleType(e.type)) {
+      syncMainCidrFields();
+    }
     document.getElementById('rTarget').value = e.target;
   }
   onRuleTypeChange();
@@ -1250,7 +1420,111 @@ async function deleteBinding(id) {
   } catch (e) { toast('删除失败', 'error'); }
 }
 
+// ── Tunnels ──
+function renderTunnels() {
+  const list = document.getElementById('tunnelList');
+  if (!list) return;
+  if (!tunnels.length) {
+    list.innerHTML = '<div style="padding:24px;color:var(--text2);text-align:center">暂无流量隧道，点击右上角添加</div>';
+    return;
+  }
+  list.innerHTML = tunnels.map(t => `
+    <div class="proxy-item${t.enabled ? '' : ' disabled'}">
+      <span class="type-badge">${esc((t.network || []).join('/').toUpperCase())}</span>
+      <div class="name">${esc(t.label || '未命名隧道')}<small>${esc(t.address)} → ${esc(t.target)}${t.proxy ? ' · via ' + esc(t.proxy) : ' · 直连'}</small></div>
+      <label class="toggle" onclick="event.stopPropagation()">
+        <input type="checkbox" ${t.enabled ? 'checked' : ''} onchange="toggleTunnel('${esc(t.id)}', this.checked)">
+        <span class="slider"></span>
+      </label>
+      <button class="btn btn-sm" onclick="editTunnel('${esc(t.id)}')">编辑</button>
+      <button class="btn btn-sm btn-danger" onclick="deleteTunnel('${esc(t.id)}')">删除</button>
+    </div>
+  `).join('');
+}
+
+function _fillTunnelProxySelect() {
+  const sel = document.getElementById('tProxy');
+  sel.innerHTML = '<option value="">直连（不经过代理）</option>' +
+    proxies.filter(p => p.enabled).map(p => `<option value="${esc(p.name)}">${esc(p.alias||p.name)}</option>`).join('') +
+    groups.map(g => `<option value="${esc(g.name)}">${esc(g.name)} (策略组)</option>`).join('');
+}
+
+function showAddTunnelModal() {
+  document.getElementById('tunnelEditId').value = '';
+  document.getElementById('tunnelModalTitle').textContent = '添加流量隧道';
+  document.getElementById('tLabel').value = '';
+  document.getElementById('tAddress').value = '';
+  document.getElementById('tTarget').value = '';
+  document.getElementById('tNetTcp').checked = true;
+  document.getElementById('tNetUdp').checked = false;
+  _fillTunnelProxySelect();
+  document.getElementById('tProxy').value = '';
+  showModal('tunnelModal');
+}
+
+function editTunnel(id) {
+  const tunnel = tunnels.find(x => x.id === id);
+  if (!tunnel) return;
+  document.getElementById('tunnelEditId').value = id;
+  document.getElementById('tunnelModalTitle').textContent = '编辑流量隧道';
+  document.getElementById('tLabel').value = tunnel.label || '';
+  document.getElementById('tAddress').value = tunnel.address || '';
+  document.getElementById('tTarget').value = tunnel.target || '';
+  document.getElementById('tNetTcp').checked = (tunnel.network || []).includes('tcp');
+  document.getElementById('tNetUdp').checked = (tunnel.network || []).includes('udp');
+  _fillTunnelProxySelect();
+  document.getElementById('tProxy').value = tunnel.proxy || '';
+  showModal('tunnelModal');
+}
+
+async function saveTunnel() {
+  const id = document.getElementById('tunnelEditId').value;
+  const label = document.getElementById('tLabel').value.trim();
+  const address = document.getElementById('tAddress').value.trim();
+  const target = document.getElementById('tTarget').value.trim();
+  const proxy = document.getElementById('tProxy').value;
+  const network = [];
+  if (document.getElementById('tNetTcp').checked) network.push('tcp');
+  if (document.getElementById('tNetUdp').checked) network.push('udp');
+  if (!network.length) { toast('请至少选择一种网络类型', 'error'); return; }
+  if (!address) { toast('请输入本地监听地址', 'error'); return; }
+  if (!target) { toast('请输入目标地址', 'error'); return; }
+  const body = { label, address, target, proxy, network };
+  try {
+    if (id) {
+      await api('/api/tunnels/' + encodeURIComponent(id), { method: 'PUT', body });
+      toast('已更新');
+    } else {
+      await api('/api/tunnels', { method: 'POST', body: { ...body, enabled: true } });
+      toast('已添加');
+    }
+    closeModal('tunnelModal');
+    tunnels = await api('/api/tunnels');
+    renderTunnels();
+  } catch (e) { toast('保存失败: ' + e.message, 'error'); }
+}
+
+async function toggleTunnel(id, enabled) {
+  try {
+    await api('/api/tunnels/' + encodeURIComponent(id), { method: 'PUT', body: { enabled } });
+    tunnels = await api('/api/tunnels');
+    renderTunnels();
+  } catch (e) { toast('操作失败', 'error'); }
+}
+
+async function deleteTunnel(id) {
+  const tunnel = tunnels.find(x => x.id === id);
+  if (!tunnel || !confirm('确定删除隧道 "' + (tunnel.label || tunnel.address) + '"？')) return;
+  try {
+    await api('/api/tunnels/' + encodeURIComponent(id), { method: 'DELETE' });
+    toast('已删除');
+    tunnels = await api('/api/tunnels');
+    renderTunnels();
+  } catch (e) { toast('删除失败', 'error'); }
+}
+
 // ── Init ──
+renderConfigDirtyBanner();
 loadAll();
 refreshStatus();
 setInterval(refreshStatus, 5000);

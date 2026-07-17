@@ -24,6 +24,24 @@ body { font-family: -apple-system, 'Segoe UI', sans-serif; background: var(--bg)
 .logo span { color: var(--accent); }
 .topbar-status { flex: 1; font-size: 13px; color: var(--text2); display: flex; align-items: center; }
 .topbar-actions { display: flex; align-items: center; gap: 8px; }
+.config-dirty-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 20px;
+  background: linear-gradient(90deg, rgba(14,165,233,0.12), rgba(245,158,11,0.14));
+  border-bottom: 1px solid rgba(14,165,233,0.18);
+}
+.config-dirty-copy {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+.config-dirty-copy strong { color: #0f172a; }
 
 /* ── App body ── */
 .app-body { display: flex; flex: 1; overflow: hidden; }
@@ -52,6 +70,19 @@ body { font-family: -apple-system, 'Segoe UI', sans-serif; background: var(--bg)
 .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .card-title { font-size: 15px; font-weight: 600; }
 
+.dashboard-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 22px;
+  background: linear-gradient(135deg, #f8fbff 0%, #eef6ff 48%, #f6f7fb 100%);
+}
+.dashboard-kicker { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); margin-bottom: 8px; }
+.dashboard-title { font-size: 28px; line-height: 1.15; margin-bottom: 8px; }
+.dashboard-subtitle { font-size: 14px; color: var(--text2); max-width: 620px; }
+.dashboard-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
 /* ── Dashboard stats grid ── */
 .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
 .stat-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 14px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.04); transition: transform 0.18s, box-shadow 0.18s; cursor: default; }
@@ -60,10 +91,18 @@ body { font-family: -apple-system, 'Segoe UI', sans-serif; background: var(--bg)
 .stat-label { font-size: 12px; color: var(--text2); margin-top: 5px; }
 .stat-card.traffic-down .stat-value { color: #0ea5e9; }
 .stat-card.traffic-up   .stat-value { color: #f59e0b; }
-.stat-card.connections  .stat-value { color: #8b5cf6; }
+.stat-card.runtime      .stat-value { color: #059669; }
+.stat-card.mode         .stat-value { color: #7c3aed; }
+.stat-card.controller   .stat-value { color: #0f766e; }
 .stat-card.speed-dl     .stat-value { color: #0ea5e9; }
 .stat-card.speed-ul     .stat-value { color: #f59e0b; }
 .stat-card.memory       .stat-value { color: #8b5cf6; }
+
+.dashboard-summary-card { padding-top: 18px; }
+.dashboard-summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.summary-item { background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+.summary-label { font-size: 12px; color: var(--text2); margin-bottom: 6px; }
+.summary-value { font-size: 14px; line-height: 1.6; color: var(--text); }
 
 /* ── Status dot ── */
 .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; vertical-align: middle; }
@@ -79,8 +118,19 @@ body { font-family: -apple-system, 'Segoe UI', sans-serif; background: var(--bg)
 .btn-danger  { background: var(--red);   border-color: var(--red);   color: #fff; }
 .btn-danger:hover  { opacity: 0.88; }
 .btn-success { background: var(--green); border-color: var(--green); color: #fff; }
+.btn-warning { background: var(--yellow); border-color: var(--yellow); color: #fff; }
+.btn-info { background: #0ea5e9; border-color: #0ea5e9; color: #fff; }
+.btn-attention {
+  animation: attentionPulse 1.5s infinite;
+  box-shadow: 0 0 0 0 rgba(14,165,233,0.45);
+}
 .btn-sm { padding: 4px 10px; font-size: 12px; }
 .btn-group { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+@keyframes attentionPulse {
+  0% { box-shadow: 0 0 0 0 rgba(14,165,233,0.35); }
+  70% { box-shadow: 0 0 0 8px rgba(14,165,233,0); }
+  100% { box-shadow: 0 0 0 0 rgba(14,165,233,0); }
+}
 
 /* ── Inputs ── */
 input, select, textarea { background: var(--bg2); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; color: var(--text); font-size: 14px; width: 100%; }
@@ -89,6 +139,12 @@ textarea { min-height: 100px; font-family: monospace; resize: vertical; }
 label { font-size: 13px; color: var(--text2); margin-bottom: 4px; display: block; }
 .form-group { margin-bottom: 12px; }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.inline-control { display: flex; align-items: center; gap: 8px; }
+.inline-control select, .inline-control input { flex: 1; min-width: 0; }
+.inline-control .btn { flex-shrink: 0; }
+.network-checks { display: flex; gap: 18px; padding-top: 6px; }
+.network-checks label { display: flex; align-items: center; gap: 8px; color: var(--text); margin-bottom: 0; cursor: pointer; }
+.network-checks input { width: auto; }
 
 /* ── Table-like list ── */
 .proxy-list { display: flex; flex-direction: column; gap: 6px; }
@@ -185,26 +241,15 @@ label { font-size: 13px; color: var(--text2); margin-bottom: 4px; display: block
 .log-follow-label { display: flex; align-items: center; gap: 5px; font-size: 13px; color: var(--text2); cursor: pointer; user-select: none; }
 .log-follow-label input { cursor: pointer; }
 
-/* ── Connection Table ── */
-.conn-table-wrap { overflow-x: auto; }
-.conn-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.conn-table th { text-align: left; padding: 8px 10px; color: var(--text2); font-weight: 600; font-size: 12px; border-bottom: 2px solid var(--border); background: var(--bg3); white-space: nowrap; }
-.conn-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
-.conn-table tbody tr:hover { background: var(--bg3); }
-.conn-table .conn-host { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-.conn-table .conn-chains { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text2); font-size: 12px; }
-.net-badge { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; }
-.net-badge.net-tcp { background: rgba(59,130,246,0.12); color: #3b82f6; }
-.net-badge.net-udp { background: rgba(245,158,11,0.12); color: #d97706; }
-.conn-table .speed-dl { color: #0ea5e9; font-weight: 500; white-space: nowrap; }
-.conn-table .speed-ul { color: #f59e0b; font-weight: 500; white-space: nowrap; }
-
 @media (max-width: 768px) {
   .sidebar { width: 52px; }
   .nav-label { display: none; }
   .nav-item { padding: 12px; justify-content: center; }
   .form-row { grid-template-columns: 1fr; }
   .stats-grid { grid-template-columns: 1fr 1fr; }
+  .config-dirty-banner { padding: 10px 12px; align-items: flex-start; }
+  .dashboard-hero { flex-direction: column; align-items: flex-start; }
+  .dashboard-summary-grid { grid-template-columns: 1fr; }
   .side-panel { width: 100vw; }
   .topbar-status { display: none; }
   .panel { padding: 12px; }

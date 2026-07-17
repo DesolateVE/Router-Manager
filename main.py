@@ -1,4 +1,4 @@
-"""Entry point for mihomo_helper (Python rewrite)."""
+"""Entry point for Router Manager."""
 from __future__ import annotations
 
 import argparse
@@ -23,7 +23,7 @@ def build_app(data_dir: str) -> tuple[FastAPI, Store, ProcessManager]:
 
     proc_mgr = ProcessManager()
 
-    app = FastAPI(title="Mihomo Helper", version="1.0.0")
+    app = FastAPI(title="Router Manager", version="1.0.0")
 
     # CORS — allow all origins (LAN dashboard convenience)
     app.add_middleware(
@@ -46,11 +46,11 @@ def build_app(data_dir: str) -> tuple[FastAPI, Store, ProcessManager]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Mihomo Helper daemon (Python)")
+    parser = argparse.ArgumentParser(description="Router Manager daemon (Python)")
     parser.add_argument(
         "-d", "--data-dir",
-        default="/etc/mihomo_helper",
-        help="Data directory for config/state (default: /etc/mihomo_helper)",
+        default="/etc/router_manager",
+        help="Data directory for config/state (default: /etc/router_manager)",
     )
     parser.add_argument(
         "-p", "--port",
@@ -66,7 +66,7 @@ def main() -> None:
     parser.add_argument(
         "--auto-start-mihomo",
         action="store_true",
-        help="Start mihomo core when mihomo_helper starts",
+        help="Start mihomo core when Router Manager starts",
     )
     args = parser.parse_args()
 

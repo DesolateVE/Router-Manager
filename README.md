@@ -1,4 +1,4 @@
-# Mihomo Helper
+# Router Manager
 
 Mihomo（Clash Meta）核心的 Web 管理面板，基于 Python/FastAPI 实现。提供 REST API 与原生 JS 前端，用于代理节点管理、策略组配置、路由规则编排以及进程控制。
 
@@ -20,7 +20,7 @@ Mihomo（Clash Meta）核心的 Web 管理面板，基于 Python/FastAPI 实现�
 ## 目录结构
 
 ```
-mihomo_helper_py/
+router_manager/
 ├── main.py           # 入口，FastAPI 应用 & CLI 参数
 ├── models.py         # Pydantic 数据模型
 ├── store.py          # 线程安全持久化（data.json）
@@ -65,7 +65,7 @@ python main.py
 |------|--------|------|
 | `--host` | `0.0.0.0` | 监听地址 |
 | `--port` | `9080` | 监听端口 |
-| `--data-dir` | `/etc/mihomo_helper` | 数据目录（存放 data.json、config.yaml） |
+| `--data-dir` | `/etc/router_manager` | 数据目录（存放 data.json、config.yaml） |
 
 示例：
 
@@ -113,10 +113,10 @@ python deploy.py --ip 10.0.8.84 --user root
 
 脚本会自动完成以下操作：
 
-1. 上传项目文件到 `/opt/mihomo_helper/`
-2. 上传资源文件到 `/etc/mihomo_helper/`
+1. 上传项目文件到 `/opt/router_manager/`
+2. 上传资源文件到 `/etc/router_manager/`
 3. 设置防火墙脚本和 `mihomo` 核心执行权限
-4. 写入 procd init 脚本 `/etc/init.d/mihomo_helper`
+4. 写入 procd init 脚本 `/etc/init.d/router_manager`
 5. 设置开机自启并立即启动服务，服务启动时自动拉起 `mihomo`
 
 部署成功后访问：`http://10.0.8.84:8080`
@@ -128,12 +128,12 @@ python deploy.py --ip 10.0.8.84 --user root
 ssh root@10.0.8.84   # 密码: weiyi
 
 # 查看状态
-/etc/init.d/mihomo_helper status
+/etc/init.d/router_manager status
 
 # 启动 / 停止 / 重启
-/etc/init.d/mihomo_helper start
-/etc/init.d/mihomo_helper stop
-/etc/init.d/mihomo_helper restart
+/etc/init.d/router_manager start
+/etc/init.d/router_manager stop
+/etc/init.d/router_manager restart
 
 # 查看日志
 logread | grep mihomo
@@ -146,8 +146,8 @@ logread | grep mihomo
 | `--host`, `--ip` | `10.0.8.84` | 目标设备 IP / 主机名 |
 | `--user`, `--username` | `root` | SSH 用户名 |
 | `--password`, `-p` | 空 | SSH 密码；不填写则使用 SSH 密钥 |
-| `--target-dir` | `/opt/mihomo_helper` | 程序安装目录 |
-| `--data-dir` | `/etc/mihomo_helper` | 数据目录 |
+| `--target-dir` | `/opt/router_manager` | 程序安装目录 |
+| `--data-dir` | `/etc/router_manager` | 数据目录 |
 | `--port` | `8080` | Web UI 端口 |
 | `--connect-timeout` | `10` | SSH 连接超时时间（秒） |
 
