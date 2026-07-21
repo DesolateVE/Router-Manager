@@ -270,17 +270,11 @@ async function refreshStatus() {
     const singBoxRunning = s.sing_box_running;
     const runtimeEl = document.getElementById('statRuntime');
     const mihomoProcessStatusEl = document.getElementById('mihomoProcessStatus');
-    const singBoxStatusEl = document.getElementById('singBoxStatus');
     const singBoxProcessStatusEl = document.getElementById('singBoxProcessStatus');
     if (runtimeEl) runtimeEl.textContent = running ? '在线' : '离线';
     if (mihomoProcessStatusEl) {
       mihomoProcessStatusEl.innerHTML = running
         ? '<span class="status-dot on"></span>运行中 (PID: ' + s.mihomo_pid + ')'
-        : '<span class="status-dot off"></span>已停止';
-    }
-    if (singBoxStatusEl) {
-      singBoxStatusEl.innerHTML = singBoxRunning
-        ? '<span class="status-dot on"></span>运行中 (PID: ' + s.sing_box_pid + ')'
         : '<span class="status-dot off"></span>已停止';
     }
     if (singBoxProcessStatusEl) {
@@ -335,11 +329,31 @@ async function loadAll() {
   } catch (e) { console.error(e); }
 }
 
+let currentPreviewCore = 'mihomo';
+
+function setPreviewCore(core) {
+  currentPreviewCore = core === 'sing-box' ? 'sing-box' : 'mihomo';
+  document.getElementById('previewCoreMihomo').classList.toggle('active', currentPreviewCore === 'mihomo');
+  document.getElementById('previewCoreSingBox').classList.toggle('active', currentPreviewCore === 'sing-box');
+  loadPreview();
+}
+
 async function loadPreview() {
+  const previewCore = currentPreviewCore;
+  const viewer = document.getElementById('yamlPreview');
   try {
-    const res = await fetch(API + '/api/config/preview');
-    document.getElementById('yamlPreview').textContent = await res.text();
-  } catch (e) { toast('加载失败', 'error'); }
+    const path = previewCore === 'sing-box' ? '/api/sing-box/config/preview' : '/api/config/preview';
+    const res = await fetch(API + path);
+    if (!res.ok) throw new Error(res.statusText);
+    const configText = await res.text();
+    if (previewCore !== currentPreviewCore) return;
+    viewer.textContent = configText;
+  } catch (e) {
+    if (previewCore === currentPreviewCore) {
+      viewer.textContent = '加载 ' + previewCore + ' 配置失败：' + (e.message || '未知错误');
+      toast('加载配置预览失败', 'error');
+    }
+  }
 }
 
 async function openConfigPreview() {
