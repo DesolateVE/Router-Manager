@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
 from models import AppState, PortBinding, ProxyNode
@@ -150,6 +151,16 @@ def generate(state: AppState) -> str:
         "inbounds": inbounds,
         "outbounds": outbounds,
         "route": {"rules": rules, "final": "direct"},
+        "experimental": {
+            "clash_api": {
+                # The management app proxies this API, so it must not be exposed
+                # directly to the LAN without an authentication secret.
+                "external_controller": f"127.0.0.1:{state.settings.sing_box_api_port}",
+                # deploy.py extracts the bundled MetaCubeXD assets here.  This
+                # also avoids sing-box attempting a network download at startup.
+                "external_ui": str(Path(state.settings.data_dir) / "metacubexd-gh-pages"),
+            }
+        },
     }
     return json.dumps(config, ensure_ascii=False, indent=2)
 

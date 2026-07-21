@@ -32,6 +32,7 @@ def create_router(store: Store, proc_mgr: ProcessManager) -> APIRouter:
             "sing_box_running": proc_mgr.sing_box_running(),
             "sing_box_pid": proc_mgr.get_sing_box_pid(),
             "mihomo_api_port": s.mihomo_api_port,
+            "sing_box_api_port": s.sing_box_api_port,
             "management_port": s.management_port,
         }
 
@@ -532,53 +533,11 @@ def create_router(store: Store, proc_mgr: ProcessManager) -> APIRouter:
         except httpx.ConnectError as exc:
             raise HTTPException(status_code=502, detail="Mihomo API 无法连接") from exc
 
-    # ── MetaCubeXD Entry/Reverse Proxy ──────────────────────────────────
+    # ── Dashboard entries / reverse proxies ──────────────────────────────
 
-    @router.get("/metacubexd-entry", response_class=HTMLResponse)
-    def metacubexd_entry() -> str:
-        s = store.get_settings()
-        port = int(s.mihomo_api_port)
-        secret_js = json.dumps(s.mihomo_api_secret or "")
-        return f"""<!doctype html>
-<html lang=\"zh-CN\">
-<head><meta charset=\"utf-8\"><title>MetaCubeXD</title></head>
-<body>
-<script>
-(function () {{
-  var host = location.hostname || '127.0.0.1';
-    var endpointId = 'router-manager';
-  var endpoint = {{
-        id: endpointId,
-    url: 'http://' + host + ':{port}',
-    secret: {secret_js}
-  }};
-    var endpointList = [];
-    try {{
-        endpointList = JSON.parse(localStorage.getItem('endpointList') || '[]');
-        if (!Array.isArray(endpointList)) endpointList = [];
-    }} catch (_) {{
-        endpointList = [];
-    }}
-    endpointList = endpointList.filter(function (item) {{
-        return item && item.id !== endpointId;
-    }});
-    endpointList.unshift(endpoint);
-    localStorage.setItem('endpointList', JSON.stringify(endpointList));
-    localStorage.setItem('selectedEndpoint', endpointId);
-  location.replace('/metacubexd/');
-}})();
-</script>
-</body>
-</html>"""
-
-    @router.get("/metacubexd")
-    def metacubexd_root() -> RedirectResponse:
-        return RedirectResponse(url="/metacubexd/", status_code=307)
-
-    @router.api_route("/metacubexd/{path:path}", methods=["GET", "HEAD"])
-    async def metacubexd_proxy(path: str, request: Request) -> Response:
-        s = store.get_settings()
-        upstream = f"http://127.0.0.1:{s.mihomo_api_port}/ui/{path}"
+    async def proxy_dashboard(path: str, request: Request, api_port: int, name: str) -> Response:
+        """Serve a core's bundled Clash dashboard through the management port."""
+        upstream = f"http://127.0.0.1:{api_port}/ui/{path}"
         if request.url.query:
             upstream = f"{upstream}?{request.url.query}"
 
@@ -592,19 +551,107 @@ def create_router(store: Store, proc_mgr: ProcessManager) -> APIRouter:
             async with httpx.AsyncClient(follow_redirects=True, timeout=10.0) as client:
                 resp = await client.request(request.method, upstream, headers=passthrough_headers)
         except httpx.HTTPError as exc:
-            raise HTTPException(status_code=502, detail=f"metacubexd upstream unavailable: {exc}") from exc
+            raise HTTPException(status_code=502, detail=f"{name} dashboard unavailable: {exc}") from exc
 
         excluded = {
-            "content-length",
-            "transfer-encoding",
-            "connection",
-            "keep-alive",
-            "proxy-authenticate",
-            "proxy-authorization",
-            "te",
-            "trailers",
-            "upgrade",
+            "content-length", "transfer-encoding", "connection", "keep-alive",
+            "proxy-authenticate", "proxy-authorization", "te", "trailers", "upgrade",
         }
+        out_headers = {k: v for k, v in resp.headers.items() if k.lower() not in excluded}
+        return Response(content=resp.content, status_code=resp.status_code, headers=out_headers)
+
+    def dashboard_entry(title: str, endpoint_id: str, endpoint_url: str, target: str) -> str:
+        return f"""<!doctype html>
+<html lang=\"zh-CN\">
+<head><meta charset=\"utf-8\"><title>{title}</title></head>
+<body>
+<script>
+(function () {{
+  var endpointId = {json.dumps(endpoint_id)};
+  var endpoint = {{ id: endpointId, url: {json.dumps(endpoint_url)}, secret: '' }};
+  var endpointList = [];
+  try {{
+    endpointList = JSON.parse(localStorage.getItem('endpointList') || '[]');
+    if (!Array.isArray(endpointList)) endpointList = [];
+  }} catch (_) {{ endpointList = []; }}
+  endpointList = endpointList.filter(function (item) {{ return item && item.id !== endpointId; }});
+  endpointList.unshift(endpoint);
+  localStorage.setItem('endpointList', JSON.stringify(endpointList));
+  localStorage.setItem('selectedEndpoint', endpointId);
+  location.replace({json.dumps(target)});
+}})();
+</script>
+</body>
+</html>"""
+
+    # ── Mihomo MetaCubeXD ────────────────────────────────────────────────
+
+    @router.get("/metacubexd-entry", response_class=HTMLResponse)
+    def metacubexd_entry() -> str:
+        s = store.get_settings()
+        # The UI runs behind this application's reverse proxy; preserve the
+        # actual Mihomo API URL and optional secret for MetaCubeXD.
+        port = int(s.mihomo_api_port)
+        secret_js = json.dumps(s.mihomo_api_secret or "")
+        return f"""<!doctype html><script>(function(){{
+var id='router-manager', host=location.hostname||'127.0.0.1', list=[];
+try{{list=JSON.parse(localStorage.getItem('endpointList')||'[]')}}catch(_){{}}
+if(!Array.isArray(list))list=[];
+list=list.filter(function(x){{return x&&x.id!==id}});
+list.unshift({{id:id,url:'http://'+host+':{port}',secret:{secret_js}}});
+localStorage.setItem('endpointList',JSON.stringify(list)); localStorage.setItem('selectedEndpoint',id);
+location.replace('/metacubexd/')}})();</script>"""
+
+    @router.get("/metacubexd")
+    def metacubexd_root() -> RedirectResponse:
+        return RedirectResponse(url="/metacubexd/", status_code=307)
+
+    @router.api_route("/metacubexd/{path:path}", methods=["GET", "HEAD"])
+    async def metacubexd_proxy(path: str, request: Request) -> Response:
+        s = store.get_settings()
+        return await proxy_dashboard(path, request, s.mihomo_api_port, "MetaCubeXD")
+
+    # ── sing-box dashboard (MetaCubeXD using sing-box's Clash API) ───────
+
+    @router.get("/sing-box-dashboard-entry", response_class=HTMLResponse)
+    def sing_box_dashboard_entry() -> str:
+        return dashboard_entry(
+            "sing-box Dashboard",
+            "router-manager-sing-box",
+            "/sing-box-api",
+            "/sing-box-dashboard/",
+        )
+
+    @router.get("/sing-box-dashboard")
+    def sing_box_dashboard_root() -> RedirectResponse:
+        return RedirectResponse(url="/sing-box-dashboard/", status_code=307)
+
+    @router.api_route("/sing-box-dashboard/{path:path}", methods=["GET", "HEAD"])
+    async def sing_box_dashboard_proxy(path: str, request: Request) -> Response:
+        s = store.get_settings()
+        if not proc_mgr.sing_box_running():
+            raise HTTPException(status_code=409, detail="sing-box 未运行")
+        return await proxy_dashboard(path, request, s.sing_box_api_port, "sing-box")
+
+    @router.api_route("/sing-box-api/{path:path}", methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"])
+    async def sing_box_api_proxy(path: str, request: Request) -> Response:
+        """Expose sing-box's Clash API only through the management origin."""
+        s = store.get_settings()
+        if not proc_mgr.sing_box_running():
+            raise HTTPException(status_code=409, detail="sing-box 未运行")
+        upstream = f"http://127.0.0.1:{s.sing_box_api_port}/{path}"
+        if request.url.query:
+            upstream = f"{upstream}?{request.url.query}"
+        headers = {
+            key: value for key in ("accept", "content-type")
+            if (value := request.headers.get(key))
+        }
+        try:
+            async with httpx.AsyncClient(follow_redirects=True, timeout=10.0) as client:
+                resp = await client.request(request.method, upstream, headers=headers, content=await request.body())
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=502, detail=f"sing-box API unavailable: {exc}") from exc
+        excluded = {"content-length", "transfer-encoding", "connection", "keep-alive"}
         out_headers = {k: v for k, v in resp.headers.items() if k.lower() not in excluded}
         return Response(content=resp.content, status_code=resp.status_code, headers=out_headers)
 

@@ -162,8 +162,8 @@
                         <p class="dashboard-subtitle">保留核心状态信息，复杂调试和连接细节交给 MetaCubeXD 仪表盘。</p>
                     </div>
                     <div class="dashboard-actions">
-                        <a class="btn btn-primary" href="/metacubexd-entry" target="_blank" rel="noopener noreferrer">打开
-                            MetaCubeXD</a>
+                        <a class="btn btn-primary" href="/metacubexd-entry" target="_blank" rel="noopener noreferrer">mihomo 仪表盘</a>
+                        <a class="btn btn-info" href="/sing-box-dashboard-entry" target="_blank" rel="noopener noreferrer">sing-box 仪表盘</a>
                         <button class="btn" onclick="openConfigPreview()">查看配置预览</button>
                     </div>
                 </div>
@@ -311,9 +311,14 @@
                     <div class="form-row">
                         <div class="form-group"><label>mihomo API 端口</label><input type="number" id="sApiPort"
                                 value="9090"></div>
-                        <div class="form-group"><label>API 密钥</label><input type="text" id="sSecret"
+                        <div class="form-group"><label>mihomo API 密钥</label><input type="text" id="sSecret"
                                 placeholder="留空不设密钥"></div>
                     </div>
+                        <div class="form-row">
+                        <div class="form-group"><label>sing-box API 端口（仅本机）</label><input type="number" id="sSingBoxApiPort"
+                            value="9091"></div>
+                        <div class="form-group"><label>sing-box 面板</label><input type="text" value="经本管理服务访问" disabled></div>
+                        </div>
                     <div class="form-group"><label>mihomo 路径</label><input type="text" id="sMihomoBin"
                             value="/usr/bin/mihomo"></div>
                         <div class="form-group"><label>sing-box 路径</label><input type="text" id="sSingBoxBin"
@@ -336,8 +341,10 @@
             <div class="panel" id="panel-logs">
                 <div class="card" style="margin-bottom:0">
                     <div class="card-header">
-                        <span class="card-title">Mihomo 日志</span>
+                        <span class="card-title" id="logPanelTitle">mihomo 日志</span>
                         <div class="btn-group">
+                            <button class="btn btn-sm active" id="logCoreMihomo" onclick="setLogCore('mihomo')">mihomo</button>
+                            <button class="btn btn-sm" id="logCoreSingBox" onclick="setLogCore('sing-box')">sing-box</button>
                             <label class="log-follow-label">
                                 <input type="checkbox" id="logAutoScroll" checked> 自动滚动
                             </label>

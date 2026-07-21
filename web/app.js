@@ -1026,6 +1026,7 @@ function loadSettingsUI() {
   document.getElementById('sAllowLan').checked = settings.allow_lan;
   document.getElementById('sApiPort').value = settings.mihomo_api_port;
   document.getElementById('sSecret').value = settings.mihomo_api_secret || '';
+  document.getElementById('sSingBoxApiPort').value = settings.sing_box_api_port || 9091;
   document.getElementById('sMihomoBin').value = settings.mihomo_bin;
   document.getElementById('sSingBoxBin').value = settings.sing_box_bin || '/usr/bin/sing-box';
   document.getElementById('sDelayTestUrl').value = settings.delay_test_url || '';
@@ -1041,6 +1042,7 @@ async function saveSettings() {
     allow_lan: document.getElementById('sAllowLan').checked,
     mihomo_api_port: parseInt(document.getElementById('sApiPort').value),
     mihomo_api_secret: document.getElementById('sSecret').value,
+    sing_box_api_port: parseInt(document.getElementById('sSingBoxApiPort').value) || 9091,
     mihomo_bin: document.getElementById('sMihomoBin').value,
     sing_box_bin: document.getElementById('sSingBoxBin').value || '/usr/bin/sing-box',
     delay_test_url: document.getElementById('sDelayTestUrl').value || 'http://www.gstatic.com/generate_204',
@@ -1049,7 +1051,7 @@ async function saveSettings() {
     await api('/api/settings', { method: 'PUT', body: s });
     const mihomoFields = ['mixed_port', 'mode', 'log_level', 'allow_lan', 'mihomo_api_port', 'mihomo_api_secret', 'mihomo_bin'];
     if (mihomoFields.some(field => prev[field] !== s[field])) markMihomoConfigDirty();
-    if ((prev.sing_box_bin || '/usr/bin/sing-box') !== s.sing_box_bin) markSingBoxConfigDirty();
+    if ((prev.sing_box_bin || '/usr/bin/sing-box') !== s.sing_box_bin || (prev.sing_box_api_port || 9091) !== s.sing_box_api_port) markSingBoxConfigDirty();
     toast('设置已保存');
     await loadAll();
   } catch (e) { toast('保存失败', 'error'); }
@@ -1707,14 +1709,31 @@ refreshStatus();
 setInterval(refreshStatus, 5000);
 
 // ── Logs ──
-let _lastLogCount = 0;
+let _lastLogSignature = null;
+let currentLogCore = 'mihomo';
+let _logRequestId = 0;
+
+function setLogCore(core) {
+  currentLogCore = core === 'sing-box' ? 'sing-box' : 'mihomo';
+  _lastLogSignature = null;
+  document.getElementById('logPanelTitle').textContent = currentLogCore + ' 日志';
+  document.getElementById('logCoreMihomo').classList.toggle('active', currentLogCore === 'mihomo');
+  document.getElementById('logCoreSingBox').classList.toggle('active', currentLogCore === 'sing-box');
+  refreshLogs();
+}
 
 async function refreshLogs() {
+  const requestedCore = currentLogCore;
+  const requestId = ++_logRequestId;
   try {
-    const data = await api('/api/logs?n=500');
+    const data = await api((requestedCore === 'sing-box' ? '/api/sing-box/logs' : '/api/logs') + '?n=500');
+    if (requestId !== _logRequestId || requestedCore !== currentLogCore) return;
     const lines = data.lines || [];
-    if (lines.length === _lastLogCount) return;
-    _lastLogCount = lines.length;
+    // The process buffers are capped at 500 lines.  Their content can change
+    // while the count remains 500, so count-only comparison leaves stale logs.
+    const signature = lines.join('\n');
+    if (signature === _lastLogSignature) return;
+    _lastLogSignature = signature;
     const viewer = document.getElementById('logViewer');
     const autoScroll = document.getElementById('logAutoScroll').checked;
     viewer.innerHTML = lines.map(l => {
@@ -1725,14 +1744,20 @@ async function refreshLogs() {
       return '<div class="log-line ' + cls + '">' + escHtml(l) + '</div>';
     }).join('');
     if (autoScroll) viewer.scrollTop = viewer.scrollHeight;
-  } catch (e) { /* silent */ }
+  } catch (e) {
+    if (requestId !== _logRequestId || requestedCore !== currentLogCore) return;
+    const viewer = document.getElementById('logViewer');
+    if (viewer) viewer.innerHTML = '<div class="log-line log-error">日志加载失败：' + escHtml(e.message || '未知错误') + '</div>';
+  }
 }
 
 async function clearLogs() {
-  await api('/api/logs', { method: 'DELETE' });
-  _lastLogCount = 0;
-  document.getElementById('logViewer').innerHTML = '';
-  toast('日志已清空');
+  try {
+    await api(currentLogCore === 'sing-box' ? '/api/sing-box/logs' : '/api/logs', { method: 'DELETE' });
+    _lastLogSignature = '';
+    document.getElementById('logViewer').innerHTML = '';
+    toast(currentLogCore + ' 日志已清空');
+  } catch (e) { toast('清空日志失败：' + e.message, 'error'); }
 }
 
 // ── Proxy Delay Test ──

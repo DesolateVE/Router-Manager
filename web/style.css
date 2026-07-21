@@ -135,6 +135,7 @@ body { font-family: -apple-system, 'Segoe UI', sans-serif; background: var(--bg)
 .btn:hover { background: #e2e8f0; }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 500; }
 .btn-primary:hover { opacity: 0.88; }
+.btn.active { border-color: var(--accent); background: var(--accent-light); color: var(--accent); font-weight: 600; }
 .btn-danger  { background: var(--red);   border-color: var(--red);   color: #fff; }
 .btn-danger:hover  { opacity: 0.88; }
 .btn-success { background: var(--green); border-color: var(--green); color: #fff; }

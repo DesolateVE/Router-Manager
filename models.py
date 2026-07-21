@@ -61,6 +61,7 @@ class AppSettings(BaseModel):
     log_level: str = "info"
     mihomo_api_port: int = 9090
     mihomo_api_secret: str = ""
+    sing_box_api_port: int = 9091
     management_port: int = 9080
     mihomo_bin: str = "/etc/router_manager/mihomo"
     sing_box_bin: str = "/usr/bin/sing-box"
