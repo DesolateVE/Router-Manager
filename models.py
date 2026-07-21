@@ -63,6 +63,7 @@ class AppSettings(BaseModel):
     mihomo_api_secret: str = ""
     management_port: int = 9080
     mihomo_bin: str = "/etc/router_manager/mihomo"
+    sing_box_bin: str = "/usr/bin/sing-box"
     data_dir: str = "/etc/router_manager"
     ipv6: bool = False
     find_process_mode: str = "off"
@@ -96,6 +97,16 @@ class TunnelEntry(BaseModel):
     enabled: bool = True
 
 
+class PortBinding(BaseModel):
+    id: str = Field(default_factory=generate_id)
+    label: str = ""
+    listen: str = "0.0.0.0"
+    port: int = 7901
+    inbound_type: str = "mixed"
+    proxy: str = ""
+    enabled: bool = True
+
+
 class AppState(BaseModel):
     settings: AppSettings = Field(default_factory=AppSettings)
     proxies: list[ProxyNode] = Field(default_factory=list)
@@ -105,3 +116,4 @@ class AppState(BaseModel):
     rule_providers: dict[str, RuleProvider] = Field(default_factory=dict)
     device_bindings: list[DeviceBinding] = Field(default_factory=list)
     tunnels: list[TunnelEntry] = Field(default_factory=list)
+    port_bindings: list[PortBinding] = Field(default_factory=list)

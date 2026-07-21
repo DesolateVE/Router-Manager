@@ -2,12 +2,14 @@ const API = '';
 let proxies = [], groups = [], rules = [], settings = {};
 let bindings = [];
 let tunnels = [];
+let portBindings = [];
 let subRuleSets = {};  // dict: set_name -> [SubRuleEntry]
 let ruleProviders = {};  // dict: name -> RuleProvider
 let proxyLatency = {};  // id -> ms (null=testing, -1=error)
 let _connWs = null, _connData = [], _connPrev = null, _connPrevTime = 0, _connPrevMap = {};
 let _connWsStopped = false;
-const CONFIG_DIRTY_KEY = 'routerManagerConfigDirty';
+const MIHOMO_CONFIG_DIRTY_KEY = 'routerManagerConfigDirty';
+const SING_BOX_CONFIG_DIRTY_KEY = 'routerManagerSingBoxConfigDirty';
 
 // Rule modal context:
 // null = main rule,  string = adding new entry to that set,  {setName, idx} = editing entry
@@ -31,25 +33,37 @@ function renderConfigDirtyBanner() {
   const banner = document.getElementById('configDirtyBanner');
   const reloadBtn = document.getElementById('btnReload');
   if (!banner || !reloadBtn) return;
-  const isDirty = localStorage.getItem(CONFIG_DIRTY_KEY) === '1';
+  const isDirty = isMihomoConfigDirty() || isSingBoxConfigDirty();
   banner.style.display = isDirty ? 'flex' : 'none';
   reloadBtn.classList.toggle('btn-attention', isDirty);
 }
 
-function markConfigDirty() {
-  localStorage.setItem(CONFIG_DIRTY_KEY, '1');
+function isMihomoConfigDirty() { return localStorage.getItem(MIHOMO_CONFIG_DIRTY_KEY) === '1'; }
+function isSingBoxConfigDirty() { return localStorage.getItem(SING_BOX_CONFIG_DIRTY_KEY) === '1'; }
+
+function markMihomoConfigDirty() {
+  localStorage.setItem(MIHOMO_CONFIG_DIRTY_KEY, '1');
   renderConfigDirtyBanner();
 }
 
-function clearConfigDirty() {
-  localStorage.removeItem(CONFIG_DIRTY_KEY);
+function markSingBoxConfigDirty() {
+  localStorage.setItem(SING_BOX_CONFIG_DIRTY_KEY, '1');
   renderConfigDirtyBanner();
 }
 
-function shouldMarkConfigDirty(path, method) {
+function clearMihomoConfigDirty() {
+  localStorage.removeItem(MIHOMO_CONFIG_DIRTY_KEY);
+  renderConfigDirtyBanner();
+}
+
+function clearSingBoxConfigDirty() {
+  localStorage.removeItem(SING_BOX_CONFIG_DIRTY_KEY);
+  renderConfigDirtyBanner();
+}
+
+function shouldMarkMihomoConfigDirty(path, method) {
   if (!['POST', 'PUT', 'DELETE'].includes(method)) return false;
   return [
-    '/api/settings',
     '/api/proxies',
     '/api/groups',
     '/api/rules',
@@ -61,9 +75,23 @@ function shouldMarkConfigDirty(path, method) {
   ].some(prefix => path.startsWith(prefix));
 }
 
-function shouldClearConfigDirty(path, method) {
+function shouldMarkSingBoxConfigDirty(path, method) {
+  if (!['POST', 'PUT', 'DELETE'].includes(method)) return false;
+  return [
+    '/api/proxies',
+    '/api/import/',
+    '/api/port-bindings'
+  ].some(prefix => path.startsWith(prefix));
+}
+
+function shouldClearMihomoConfigDirty(path, method) {
   if (method !== 'POST') return false;
-  return path === '/api/reload' || path === '/api/start' || path === '/api/restart';
+  return path === '/api/apply' || path === '/api/reload' || path === '/api/start' || path === '/api/restart';
+}
+
+function shouldClearSingBoxConfigDirty(path, method) {
+  if (method !== 'POST') return false;
+  return path === '/api/apply' || path === '/api/sing-box/start' || path === '/api/sing-box/restart';
 }
 
 // ── API helpers ──
@@ -79,8 +107,10 @@ async function api(path, opts = {}) {
     try { const j = await res.json(); detail = j.detail || detail; } catch (_) {}
     throw new Error(detail);
   }
-  if (shouldClearConfigDirty(path, method)) clearConfigDirty();
-  else if (shouldMarkConfigDirty(path, method)) markConfigDirty();
+  if (shouldClearMihomoConfigDirty(path, method)) clearMihomoConfigDirty();
+  else if (shouldMarkMihomoConfigDirty(path, method)) markMihomoConfigDirty();
+  if (shouldClearSingBoxConfigDirty(path, method)) clearSingBoxConfigDirty();
+  else if (shouldMarkSingBoxConfigDirty(path, method)) markSingBoxConfigDirty();
   return res.json();
 }
 
@@ -115,6 +145,16 @@ document.querySelectorAll('.nav-item').forEach(item => {
 // ── Modal ──
 function closeModal(id) { document.getElementById(id).classList.remove('show'); }
 function showModal(id) { document.getElementById(id).classList.add('show'); }
+
+function toggleProcessPanel(event) {
+  if (event) event.stopPropagation();
+  document.getElementById('processPopover').classList.toggle('show');
+}
+
+document.addEventListener('click', () => {
+  const popover = document.getElementById('processPopover');
+  if (popover) popover.classList.remove('show');
+});
 
 // ── Utils ──
 function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
@@ -187,12 +227,8 @@ function updateDashboardStats(data, dlSpeed, ulSpeed) {
 
 function renderDashboardSummary() {
   const modeMap = { rule: '规则', global: '全局', direct: '直连' };
-  const runtimeEl = document.getElementById('statRuntime');
   const modeEl = document.getElementById('statMode');
   const controllerEl = document.getElementById('statController');
-  if (runtimeEl) {
-    runtimeEl.textContent = _connWsStopped ? '离线' : (document.getElementById('btnStop').style.display === 'none' ? '离线' : '在线');
-  }
   if (modeEl) {
     modeEl.textContent = modeMap[settings.mode] || settings.mode || '--';
   }
@@ -231,20 +267,34 @@ async function refreshStatus() {
   try {
     const s = await api('/api/status');
     const running = s.mihomo_running;
+    const singBoxRunning = s.sing_box_running;
     const runtimeEl = document.getElementById('statRuntime');
-    document.getElementById('statusText').innerHTML = running
-      ? '<span class="status-dot on"></span>运行中 (PID: ' + s.mihomo_pid + ')'
-      : '<span class="status-dot off"></span>已停止';
+    const mihomoProcessStatusEl = document.getElementById('mihomoProcessStatus');
+    const singBoxStatusEl = document.getElementById('singBoxStatus');
+    const singBoxProcessStatusEl = document.getElementById('singBoxProcessStatus');
     if (runtimeEl) runtimeEl.textContent = running ? '在线' : '离线';
-    document.getElementById('btnStart').style.display = running ? 'none' : '';
-    document.getElementById('btnStop').style.display = running ? '' : 'none';
+    if (mihomoProcessStatusEl) {
+      mihomoProcessStatusEl.innerHTML = running
+        ? '<span class="status-dot on"></span>运行中 (PID: ' + s.mihomo_pid + ')'
+        : '<span class="status-dot off"></span>已停止';
+    }
+    if (singBoxStatusEl) {
+      singBoxStatusEl.innerHTML = singBoxRunning
+        ? '<span class="status-dot on"></span>运行中 (PID: ' + s.sing_box_pid + ')'
+        : '<span class="status-dot off"></span>已停止';
+    }
+    if (singBoxProcessStatusEl) {
+      singBoxProcessStatusEl.innerHTML = singBoxRunning
+        ? '<span class="status-dot on"></span>运行中 (PID: ' + s.sing_box_pid + ')'
+        : '<span class="status-dot off"></span>已停止';
+    }
   } catch (e) { console.error(e); }
 }
 
 async function controlMihomo(action) {
   try {
     await api('/api/' + action, { method: 'POST' });
-    if (action === 'start' || action === 'restart') clearConfigDirty();
+    if (action === 'start' || action === 'restart') clearMihomoConfigDirty();
     toast(action === 'start' ? '已启动' : action === 'stop' ? '已停止' : '已重启');
     if (action === 'stop') { stopConnWs(); }
     if (action === 'start' || action === 'restart') { setTimeout(startConnWs, 1200); }
@@ -252,19 +302,28 @@ async function controlMihomo(action) {
   } catch (e) { toast('操作失败: ' + e.message, 'error'); }
 }
 
+async function controlSingBox(action) {
+  try {
+    await api('/api/sing-box/' + action, { method: 'POST' });
+    toast(action === 'start' ? 'sing-box 已启动' : action === 'stop' ? 'sing-box 已停止' : 'sing-box 已重启');
+    setTimeout(refreshStatus, 500);
+  } catch (e) { toast('sing-box 操作失败: ' + e.message, 'error'); }
+}
+
 // ── Load data ──
 async function loadAll() {
   try {
-    [proxies, groups, rules, settings, subRuleSets, ruleProviders, bindings, tunnels] = await Promise.all([
+    [proxies, groups, rules, settings, subRuleSets, ruleProviders, bindings, tunnels, portBindings] = await Promise.all([
       api('/api/proxies'), api('/api/groups'), api('/api/rules'),
       api('/api/settings'), api('/api/sub-rules'), api('/api/rule-providers'),
-      api('/api/device-bindings'), api('/api/tunnels')
+      api('/api/device-bindings'), api('/api/tunnels'), api('/api/port-bindings')
     ]);
     renderProxies();
     renderGroups();
     renderRules();
     renderBindings();
     renderTunnels();
+    renderPortBindings();
     loadSettingsUI();
     renderDashboardSummary();
     document.getElementById('statProxies').textContent = proxies.length;
@@ -422,7 +481,7 @@ function toggleImportFields() {
   ['importUriField','importTextField','importYamlField'].forEach(f => {
     document.getElementById(f).style.display = 'none';
   });
-  const fieldMap = { uri: 'importUriField', text: 'importTextField', yaml: 'importYamlField' };
+  const fieldMap = { uri: 'importUriField', text: 'importTextField', yaml: 'importYamlField', singbox: 'importYamlField' };
   if (fieldMap[type]) document.getElementById(fieldMap[type]).style.display = '';
 }
 
@@ -436,6 +495,8 @@ async function doImport() {
       result = await api('/api/import/text', { method: 'POST', body: { text: document.getElementById('importText').value } });
     else if (type === 'yaml')
       result = await api('/api/import/yaml', { method: 'POST', body: { yaml: document.getElementById('importYamlContent').value } });
+    else if (type === 'singbox')
+      result = await api('/api/import/sing-box', { method: 'POST', body: { json: document.getElementById('importYamlContent').value } });
     if (result.error) { toast(result.error, 'error'); return; }
     closeModal('importModal');
     toast('成功导入 ' + (result.imported || 0) + ' 个节点');
@@ -966,10 +1027,12 @@ function loadSettingsUI() {
   document.getElementById('sApiPort').value = settings.mihomo_api_port;
   document.getElementById('sSecret').value = settings.mihomo_api_secret || '';
   document.getElementById('sMihomoBin').value = settings.mihomo_bin;
+  document.getElementById('sSingBoxBin').value = settings.sing_box_bin || '/usr/bin/sing-box';
   document.getElementById('sDelayTestUrl').value = settings.delay_test_url || '';
 }
 
 async function saveSettings() {
+  const prev = { ...settings };
   const s = {
     ...settings,
     mixed_port: parseInt(document.getElementById('sMixedPort').value),
@@ -979,10 +1042,14 @@ async function saveSettings() {
     mihomo_api_port: parseInt(document.getElementById('sApiPort').value),
     mihomo_api_secret: document.getElementById('sSecret').value,
     mihomo_bin: document.getElementById('sMihomoBin').value,
+    sing_box_bin: document.getElementById('sSingBoxBin').value || '/usr/bin/sing-box',
     delay_test_url: document.getElementById('sDelayTestUrl').value || 'http://www.gstatic.com/generate_204',
   };
   try {
     await api('/api/settings', { method: 'PUT', body: s });
+    const mihomoFields = ['mixed_port', 'mode', 'log_level', 'allow_lan', 'mihomo_api_port', 'mihomo_api_secret', 'mihomo_bin'];
+    if (mihomoFields.some(field => prev[field] !== s[field])) markMihomoConfigDirty();
+    if ((prev.sing_box_bin || '/usr/bin/sing-box') !== s.sing_box_bin) markSingBoxConfigDirty();
     toast('设置已保存');
     await loadAll();
   } catch (e) { toast('保存失败', 'error'); }
@@ -991,14 +1058,20 @@ async function saveSettings() {
 // (esc/escHtml/formatBytes defined above)
 
 async function reloadConfig() {
+  const applyMihomo = isMihomoConfigDirty();
+  const applySingBox = isSingBoxConfigDirty();
+  if (!applyMihomo && !applySingBox) {
+    toast('没有待应用的配置');
+    return;
+  }
   try {
-    const r = await api('/api/reload', { method: 'POST' });
-    if (r.error) toast('重载失败: ' + r.error, 'error');
-    else {
-      clearConfigDirty();
-      toast('配置已重载');
-    }
-  } catch (e) { toast('重载失败', 'error'); }
+    await api('/api/apply', { method: 'POST', body: { mihomo: applyMihomo, sing_box: applySingBox } });
+    const parts = [];
+    if (applyMihomo) parts.push('主配置已热重载');
+    if (applySingBox) parts.push('端口绑定已应用');
+    toast(parts.join('，'));
+    setTimeout(refreshStatus, 500);
+  } catch (e) { toast('应用配置失败: ' + e.message, 'error'); }
 }
 
 // ── Sub-Rule Manager Side Panel ──
@@ -1334,7 +1407,7 @@ async function deleteRuleProvider(name) {
   await loadAll();
 }
 
-// ── Device Bindings (Xbox Proxy) ──
+// ── Quick Bindings ──
 function renderBindings() {
   const list = document.getElementById('bindingList');
   if (!list) return;
@@ -1357,7 +1430,7 @@ function renderBindings() {
 
 function showAddBindingModal() {
   document.getElementById('bindingEditId').value = '';
-  document.getElementById('bindingModalTitle').textContent = '添加设备绑定';
+  document.getElementById('bindingModalTitle').textContent = '添加快捷绑定';
   document.getElementById('bLabel').value = '';
   document.getElementById('bIp').value = '';
   _fillBindingProxySelect();
@@ -1376,7 +1449,7 @@ function editBinding(id) {
   const b = bindings.find(x => x.id === id);
   if (!b) return;
   document.getElementById('bindingEditId').value = id;
-  document.getElementById('bindingModalTitle').textContent = '编辑设备绑定';
+  document.getElementById('bindingModalTitle').textContent = '编辑快捷绑定';
   document.getElementById('bLabel').value = b.label;
   document.getElementById('bIp').value = b.ip;
   _fillBindingProxySelect();
@@ -1524,6 +1597,106 @@ async function deleteTunnel(id) {
     toast('已删除');
     tunnels = await api('/api/tunnels');
     renderTunnels();
+  } catch (e) { toast('删除失败', 'error'); }
+}
+
+// ── sing-box Port Bindings ──
+function renderPortBindings() {
+  const list = document.getElementById('portBindingList');
+  if (!list) return;
+  if (!portBindings.length) {
+    list.innerHTML = '<div style="padding:24px;color:var(--text2);text-align:center">暂无端口绑定，点击右上角添加</div>';
+    return;
+  }
+  list.innerHTML = portBindings.map(b => {
+    const proxy = proxies.find(p => p.id === b.proxy);
+    const target = proxy ? (proxy.alias || proxy.name) : '未选择节点';
+    return `
+    <div class="proxy-item${b.enabled ? '' : ' disabled'}">
+      <span class="type-badge">${esc(b.inbound_type || 'mixed')}</span>
+      <div class="name">${esc(b.label || '未命名端口')}<small>${esc(b.listen || '0.0.0.0')}:${b.port} → ${esc(target)}</small></div>
+      <label class="toggle" onclick="event.stopPropagation()">
+        <input type="checkbox" ${b.enabled ? 'checked' : ''} onchange="togglePortBinding('${esc(b.id)}', this.checked)">
+        <span class="slider"></span>
+      </label>
+      <button class="btn btn-sm" onclick="editPortBinding('${esc(b.id)}')">编辑</button>
+      <button class="btn btn-sm btn-danger" onclick="deletePortBinding('${esc(b.id)}')">删除</button>
+    </div>`;
+  }).join('');
+}
+
+function _fillPortBindingProxySelect() {
+  const sel = document.getElementById('pbProxy');
+  sel.innerHTML = '<option value="">请选择节点</option>' +
+    proxies.filter(p => p.enabled).map(p => `<option value="${esc(p.id)}">${esc(p.alias || p.name)} (${esc(p.type)})</option>`).join('');
+}
+
+function showAddPortBindingModal() {
+  document.getElementById('portBindingEditId').value = '';
+  document.getElementById('portBindingModalTitle').textContent = '添加端口绑定';
+  document.getElementById('pbLabel').value = '';
+  document.getElementById('pbListen').value = '0.0.0.0';
+  document.getElementById('pbPort').value = '7901';
+  document.getElementById('pbInboundType').value = 'mixed';
+  _fillPortBindingProxySelect();
+  document.getElementById('pbProxy').value = '';
+  showModal('portBindingModal');
+}
+
+function editPortBinding(id) {
+  const binding = portBindings.find(x => x.id === id);
+  if (!binding) return;
+  document.getElementById('portBindingEditId').value = id;
+  document.getElementById('portBindingModalTitle').textContent = '编辑端口绑定';
+  document.getElementById('pbLabel').value = binding.label || '';
+  document.getElementById('pbListen').value = binding.listen || '0.0.0.0';
+  document.getElementById('pbPort').value = binding.port || 7901;
+  document.getElementById('pbInboundType').value = binding.inbound_type || 'mixed';
+  _fillPortBindingProxySelect();
+  document.getElementById('pbProxy').value = binding.proxy || '';
+  showModal('portBindingModal');
+}
+
+async function savePortBinding() {
+  const id = document.getElementById('portBindingEditId').value;
+  const label = document.getElementById('pbLabel').value.trim();
+  const listen = document.getElementById('pbListen').value.trim() || '0.0.0.0';
+  const port = parseInt(document.getElementById('pbPort').value) || 0;
+  const inbound_type = document.getElementById('pbInboundType').value;
+  const proxy = document.getElementById('pbProxy').value;
+  if (port <= 0 || port > 65535) { toast('请输入有效端口', 'error'); return; }
+  if (!proxy) { toast('请选择节点', 'error'); return; }
+  const body = { label, listen, port, inbound_type, proxy };
+  try {
+    if (id) {
+      await api('/api/port-bindings/' + encodeURIComponent(id), { method: 'PUT', body });
+      toast('已更新');
+    } else {
+      await api('/api/port-bindings', { method: 'POST', body: { ...body, enabled: true } });
+      toast('已添加');
+    }
+    closeModal('portBindingModal');
+    portBindings = await api('/api/port-bindings');
+    renderPortBindings();
+  } catch (e) { toast('保存失败: ' + e.message, 'error'); }
+}
+
+async function togglePortBinding(id, enabled) {
+  try {
+    await api('/api/port-bindings/' + encodeURIComponent(id), { method: 'PUT', body: { enabled } });
+    portBindings = await api('/api/port-bindings');
+    renderPortBindings();
+  } catch (e) { toast('操作失败', 'error'); }
+}
+
+async function deletePortBinding(id) {
+  const binding = portBindings.find(x => x.id === id);
+  if (!binding || !confirm('确定删除端口绑定 "' + (binding.label || binding.port) + '"？')) return;
+  try {
+    await api('/api/port-bindings/' + encodeURIComponent(id), { method: 'DELETE' });
+    toast('已删除');
+    portBindings = await api('/api/port-bindings');
+    renderPortBindings();
   } catch (e) { toast('删除失败', 'error'); }
 }
 

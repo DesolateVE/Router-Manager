@@ -48,7 +48,8 @@ def _build_proxy(p: ProxyNode, name: str, state: AppState, id_to_name: dict[str,
         "server": p.server,
         "port": p.port,
     }
-    d.update(p.extra)
+    extra = {k: v for k, v in p.extra.items() if k not in ("source-format", "sing-box-outbound")}
+    d.update(extra)
     # dialer-proxy must reference the real node/group name, not an alias
     if "dialer-proxy" in d:
         d["dialer-proxy"] = _resolve_ref(state, str(d["dialer-proxy"]), id_to_name)

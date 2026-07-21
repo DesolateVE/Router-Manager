@@ -28,6 +28,7 @@ DEFAULT_DATA_DIR = "/etc/router_manager"
 LEGACY_TARGET_DIR = "/opt/mihomo_helper"
 LEGACY_DATA_DIR = "/etc/mihomo_helper"
 DEFAULT_SERVICE_PORT = "8080"
+METACUBEXD_ARCHIVE_NAME = "metacubexd-gh-pages.zip"
 
 ROOT = Path(__file__).resolve().parent
 INIT_TEMPLATE = ROOT / "router_manager.init"
@@ -182,6 +183,8 @@ class Deployer:
         log(f"Connecting to {self.user}@{self.host} ...")
         self.client.ssh("uname -a")
 
+        self._ensure_target_packages()
+
         log("Stopping existing services before update ...")
         self.client.ssh(
             f"if [ -x /etc/init.d/{shell_quote(SERVICE_NAME)[1:-1]} ]; then /etc/init.d/{SERVICE_NAME} stop || true; fi; "
@@ -204,6 +207,7 @@ class Deployer:
                 ROOT / "main.py",
                 ROOT / "models.py",
                 ROOT / "config_gen.py",
+                ROOT / "singbox_gen.py",
                 ROOT / "import_engine.py",
                 ROOT / "process_mgr.py",
                 ROOT / "store.py",
@@ -226,6 +230,8 @@ class Deployer:
             if source.is_file():
                 log(f"  -> {source.relative_to(ROOT).as_posix()}")
                 self.client.upload_files([source], self.data_dir)
+
+        self._extract_metacubexd_archive()
 
         log("Installing Python dependencies on target ...")
         self.client.ssh(
@@ -268,6 +274,28 @@ class Deployer:
 
         log(f"Done! Web UI:  http://{self.host}:{self.service_port}")
 
+    def _ensure_target_packages(self) -> None:
+        log("Checking target runtime packages ...")
+        self.client.ssh(
+            "set -e; "
+            "if ! command -v apk >/dev/null 2>&1; then "
+            "echo 'Error: apk package manager not found on target. This deploy script expects apk-based OpenWrt.' >&2; "
+            "exit 1; "
+            "fi; "
+            "missing=''; "
+            "if ! command -v python3 >/dev/null 2>&1; then missing=\"$missing python3\"; fi; "
+            "if ! python3 -m pip --version >/dev/null 2>&1; then missing=\"$missing py3-pip\"; fi; "
+            "if ! command -v sing-box >/dev/null 2>&1; then missing=\"$missing sing-box\"; fi; "
+            "if [ -n \"$missing\" ]; then "
+            "echo \"Installing missing packages:$missing\"; "
+            "apk update; "
+            "apk add $missing; "
+            "fi; "
+            "python3 --version; "
+            "python3 -m pip --version; "
+            "sing-box version"
+        )
+
     def _migrate_legacy_data_dir(self) -> None:
         if self.data_dir == LEGACY_DATA_DIR:
             return
@@ -290,6 +318,26 @@ class Deployer:
             f"        settings['mihomo_bin'] = {self.data_dir + '/mihomo'!r}\n"
             "    data['settings'] = settings\n"
             "    target_data.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')\n"
+            "PY"
+        )
+
+    def _extract_metacubexd_archive(self) -> None:
+        log(f"Extracting {METACUBEXD_ARCHIVE_NAME} in {self.data_dir} ...")
+        remote_archive = self.data_dir.rstrip("/") + "/" + METACUBEXD_ARCHIVE_NAME
+        self.client.ssh(
+            "python3 - <<'PY'\n"
+            "from pathlib import Path\n"
+            "from zipfile import ZipFile\n"
+            f"archive = Path({remote_archive!r})\n"
+            f"target = Path({self.data_dir!r})\n"
+            "if archive.exists():\n"
+            "    target.mkdir(parents=True, exist_ok=True)\n"
+            "    with ZipFile(archive) as zf:\n"
+            "        for member in zf.infolist():\n"
+            "            dest = (target / member.filename).resolve()\n"
+            "            if target.resolve() not in dest.parents and dest != target.resolve():\n"
+            "                raise RuntimeError(f'Unsafe zip entry: {member.filename}')\n"
+            "        zf.extractall(target)\n"
             "PY"
         )
 

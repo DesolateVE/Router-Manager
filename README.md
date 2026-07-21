@@ -90,8 +90,9 @@ pip install paramiko
 ```
 
 目标设备需满足：
-- 已联网，可访问 opkg 源
-- 存储空间充足（Python3 + 依赖约 80MB）
+- 已联网，可访问 apk 源
+- 存储空间充足（Python3 + pip + sing-box + 依赖约 100MB）
+- 部署脚本会检查 `python3`、`py3-pip`、`sing-box`，缺失时自动执行 `apk add` 安装
 
 ### 一键部署
 
@@ -113,11 +114,13 @@ python deploy.py --ip 10.0.8.84 --user root
 
 脚本会自动完成以下操作：
 
-1. 上传项目文件到 `/opt/router_manager/`
-2. 上传资源文件到 `/etc/router_manager/`
-3. 设置防火墙脚本和 `mihomo` 核心执行权限
-4. 写入 procd init 脚本 `/etc/init.d/router_manager`
-5. 设置开机自启并立即启动服务，服务启动时自动拉起 `mihomo`
+1. 检查并安装目标机缺失的 `python3`、`py3-pip`、`sing-box`
+2. 上传项目文件到 `/opt/router_manager/`
+3. 上传资源文件到 `/etc/router_manager/`
+4. 解压 MetaCubeXD 静态资源
+5. 设置防火墙脚本和 `mihomo` 核心执行权限
+6. 写入 procd init 脚本 `/etc/init.d/router_manager`
+7. 设置开机自启并立即启动服务，服务启动时自动拉起 `mihomo` 和 `sing-box`
 
 部署成功后访问：`http://10.0.8.84:8080`
 

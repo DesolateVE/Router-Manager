@@ -15,7 +15,8 @@ start_service() {
     procd_set_param command python3 __TARGET_DIR__/main.py \
         --data-dir __DATA_DIR__ \
         --port __SERVICE_PORT__ \
-        --auto-start-mihomo
+        --auto-start-mihomo \
+        --auto-start-sing-box
     procd_set_param respawn ${respawn_threshold:-3600} ${respawn_timeout:-5} ${respawn_retry:-5}
     procd_set_param stdout 1
     procd_set_param stderr 1

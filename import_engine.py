@@ -372,6 +372,111 @@ def _yaml_node_to_proxy(m: dict[str, Any]) -> ProxyNode | None:
     return node if _is_valid(node) else None
 
 
+# ── sing-box outbound helper ───────────────────────────────────────────────
+
+_SING_BOX_TYPE_MAP = {
+    "shadowsocks": "ss",
+    "socks": "socks5",
+    "http": "http",
+    "vmess": "vmess",
+    "vless": "vless",
+    "trojan": "trojan",
+    "hysteria2": "hysteria2",
+    "tuic": "tuic",
+}
+
+
+def _copy_if_present(src: dict[str, Any], dst: dict[str, Any], src_key: str, dst_key: str | None = None) -> None:
+    if src_key in src and src[src_key] not in (None, ""):
+        dst[dst_key or src_key] = src[src_key]
+
+
+def _merge_singbox_tls(node_type: str, tls: Any, extra: dict[str, Any]) -> None:
+    if not isinstance(tls, dict):
+        return
+    if tls.get("enabled") is False:
+        return
+    if node_type in ("vmess", "vless"):
+        extra["tls"] = True
+    _copy_if_present(tls, extra, "server_name", "sni")
+    _copy_if_present(tls, extra, "alpn")
+    if "insecure" in tls:
+        extra["skip-cert-verify"] = bool(tls["insecure"])
+
+    utls = tls.get("utls")
+    if isinstance(utls, dict):
+        _copy_if_present(utls, extra, "fingerprint", "client-fingerprint")
+
+    reality = tls.get("reality")
+    if isinstance(reality, dict):
+        reality_opts: dict[str, Any] = {}
+        _copy_if_present(reality, reality_opts, "public_key", "public-key")
+        _copy_if_present(reality, reality_opts, "short_id", "short-id")
+        if reality_opts:
+            extra["reality-opts"] = reality_opts
+
+
+def _merge_singbox_transport(transport: Any, extra: dict[str, Any]) -> None:
+    if not isinstance(transport, dict):
+        return
+    transport_type = str(transport.get("type", ""))
+    if not transport_type:
+        return
+    extra["network"] = transport_type
+    if transport_type == "ws":
+        ws_opts: dict[str, Any] = {}
+        _copy_if_present(transport, ws_opts, "path")
+        headers = transport.get("headers")
+        if isinstance(headers, dict) and headers:
+            ws_opts["headers"] = headers
+        if ws_opts:
+            extra["ws-opts"] = ws_opts
+    elif transport_type == "grpc":
+        grpc_opts: dict[str, Any] = {}
+        _copy_if_present(transport, grpc_opts, "service_name", "grpc-service-name")
+        if grpc_opts:
+            extra["grpc-opts"] = grpc_opts
+
+
+def _singbox_outbound_to_proxy(m: dict[str, Any]) -> ProxyNode | None:
+    sing_type = str(m.get("type", ""))
+    node_type = _SING_BOX_TYPE_MAP.get(sing_type)
+    if not node_type:
+        return None
+
+    node = ProxyNode(id=generate_id(), enabled=True)
+    node.name = str(m.get("tag", ""))
+    node.type = node_type
+    node.server = str(m.get("server", ""))
+    try:
+        node.port = int(m.get("server_port", m.get("port", 0)))
+    except (ValueError, TypeError):
+        return None
+
+    _copy_if_present(m, node.extra, "password")
+    _copy_if_present(m, node.extra, "uuid")
+    _copy_if_present(m, node.extra, "username")
+    _copy_if_present(m, node.extra, "method", "cipher")
+    _copy_if_present(m, node.extra, "alter_id", "alterId")
+    _copy_if_present(m, node.extra, "security", "cipher")
+    _copy_if_present(m, node.extra, "flow")
+
+    if sing_type == "hysteria2":
+        _copy_if_present(m, node.extra, "obfs")
+        _copy_if_present(m, node.extra, "obfs_password", "obfs-password")
+
+    _merge_singbox_transport(m.get("transport"), node.extra)
+    _merge_singbox_tls(node_type, m.get("tls"), node.extra)
+
+    # Preserve the exact sing-box outbound for future sing-box config generation.
+    node.extra["source-format"] = "sing-box"
+    node.extra["sing-box-outbound"] = m
+
+    if not node.name:
+        node.name = f"{node.server}:{node.port}"
+    return node if _is_valid(node) else None
+
+
 # ── Public API ─────────────────────────────────────────────────────────────
 
 _SCHEME_PARSERS = {
@@ -451,6 +556,32 @@ def parse_yaml_proxies(text: str) -> list[ProxyNode]:
     for item in proxies_raw:
         if isinstance(item, dict):
             node = _yaml_node_to_proxy(item)
+            if node:
+                result.append(node)
+    return result
+
+
+def parse_singbox_json(text: str) -> list[ProxyNode]:
+    """Parse sing-box outbound JSON into the common ProxyNode model."""
+    if not text.strip():
+        return []
+    try:
+        doc = json.loads(text)
+    except Exception:
+        return []
+
+    outbounds_raw: list[Any] = []
+    if isinstance(doc, dict) and isinstance(doc.get("outbounds"), list):
+        outbounds_raw = doc["outbounds"]
+    elif isinstance(doc, list):
+        outbounds_raw = doc
+    elif isinstance(doc, dict) and "type" in doc:
+        outbounds_raw = [doc]
+
+    result: list[ProxyNode] = []
+    for item in outbounds_raw:
+        if isinstance(item, dict):
+            node = _singbox_outbound_to_proxy(item)
             if node:
                 result.append(node)
     return result

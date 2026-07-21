@@ -6,7 +6,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from models import AppSettings, AppState, DeviceBinding, ProxyGroup, ProxyNode, Rule, RuleProvider, SubRuleEntry, TunnelEntry, generate_id
+from models import AppSettings, AppState, DeviceBinding, PortBinding, ProxyGroup, ProxyNode, Rule, RuleProvider, SubRuleEntry, TunnelEntry, generate_id
 
 
 class Store:
@@ -86,6 +86,7 @@ class Store:
             # Remove from all groups
             for g in self._state.groups:
                 g.proxies = [ref for ref in g.proxies if ref != pid]
+            self._state.port_bindings = [b for b in self._state.port_bindings if b.proxy != pid]
             self._save_unlocked()
             return True
 
@@ -330,6 +331,39 @@ class Store:
             before = len(self._state.tunnels)
             self._state.tunnels = [t for t in self._state.tunnels if t.id != tunnel_id]
             if len(self._state.tunnels) == before:
+                return False
+            self._save_unlocked()
+            return True
+
+    # ── sing-box Port Bindings ───────────────────────────────────────────
+
+    def get_port_bindings(self) -> list[PortBinding]:
+        with self._lock:
+            return list(self._state.port_bindings)
+
+    def add_port_binding(self, binding: PortBinding) -> None:
+        with self._lock:
+            if not binding.id:
+                binding.id = generate_id()
+            self._state.port_bindings.append(binding)
+            self._save_unlocked()
+
+    def update_port_binding(self, binding_id: str, patch: dict[str, Any]) -> bool:
+        with self._lock:
+            binding = next((x for x in self._state.port_bindings if x.id == binding_id), None)
+            if binding is None:
+                return False
+            for field in ("label", "listen", "port", "inbound_type", "proxy", "enabled"):
+                if field in patch:
+                    setattr(binding, field, patch[field])
+            self._save_unlocked()
+            return True
+
+    def delete_port_binding(self, binding_id: str) -> bool:
+        with self._lock:
+            before = len(self._state.port_bindings)
+            self._state.port_bindings = [b for b in self._state.port_bindings if b.id != binding_id]
+            if len(self._state.port_bindings) == before:
                 return False
             self._save_unlocked()
             return True

@@ -68,13 +68,20 @@ def main() -> None:
         action="store_true",
         help="Start mihomo core when Router Manager starts",
     )
+    parser.add_argument(
+        "--auto-start-sing-box",
+        action="store_true",
+        help="Start sing-box core when Router Manager starts",
+    )
     args = parser.parse_args()
 
     app, _store, _proc = build_app(args.data_dir)
 
+    atexit.register(_proc.stop_sing_box)
     atexit.register(_proc.stop)
 
     def _shutdown(signum, frame):  # noqa: ANN001
+        _proc.stop_sing_box()
         _proc.stop()
         sys.exit(0)
 
@@ -84,6 +91,9 @@ def main() -> None:
     if args.auto_start_mihomo:
         if not _proc.start(_store.get_state()):
             print(f"Failed to auto-start mihomo: {_proc.last_error}", file=sys.stderr)
+    if args.auto_start_sing_box:
+        if not _proc.start_sing_box(_store.get_state()):
+            print(f"Failed to auto-start sing-box: {_proc.sing_box_last_error}", file=sys.stderr)
 
     uvicorn.run(app, host=args.host, port=args.port)
 

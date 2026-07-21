@@ -12,7 +12,8 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse,
 
 import config_gen
 import import_engine
-from models import AppSettings, DeviceBinding, ProxyGroup, ProxyNode, Rule, RuleProvider, SubRuleEntry, TunnelEntry
+import singbox_gen
+from models import AppSettings, DeviceBinding, PortBinding, ProxyGroup, ProxyNode, Rule, RuleProvider, SubRuleEntry, TunnelEntry
 from process_mgr import ProcessManager
 from store import Store
 
@@ -28,6 +29,8 @@ def create_router(store: Store, proc_mgr: ProcessManager) -> APIRouter:
         return {
             "mihomo_running": proc_mgr.running(),
             "mihomo_pid": proc_mgr.get_pid(),
+            "sing_box_running": proc_mgr.sing_box_running(),
+            "sing_box_pid": proc_mgr.get_sing_box_pid(),
             "mihomo_api_port": s.mihomo_api_port,
             "management_port": s.management_port,
         }
@@ -53,6 +56,25 @@ def create_router(store: Store, proc_mgr: ProcessManager) -> APIRouter:
             return {"ok": True}
         raise HTTPException(status_code=500, detail=proc_mgr.last_error or "Failed to restart mihomo")
 
+    @router.post("/api/sing-box/start")
+    def start_sing_box() -> dict[str, Any]:
+        state = store.get_state()
+        if proc_mgr.start_sing_box(state):
+            return {"ok": True}
+        raise HTTPException(status_code=500, detail=proc_mgr.sing_box_last_error or "Failed to start sing-box")
+
+    @router.post("/api/sing-box/stop")
+    def stop_sing_box() -> dict[str, Any]:
+        proc_mgr.stop_sing_box()
+        return {"ok": True}
+
+    @router.post("/api/sing-box/restart")
+    def restart_sing_box() -> dict[str, Any]:
+        state = store.get_state()
+        if proc_mgr.restart_sing_box(state):
+            return {"ok": True}
+        raise HTTPException(status_code=500, detail=proc_mgr.sing_box_last_error or "Failed to restart sing-box")
+
     # ── Logs ───────────────────────────────────────────────────────────────
 
     @router.get("/api/logs")
@@ -62,6 +84,15 @@ def create_router(store: Store, proc_mgr: ProcessManager) -> APIRouter:
     @router.delete("/api/logs")
     def clear_logs() -> dict[str, Any]:
         proc_mgr.clear_logs()
+        return {"ok": True}
+
+    @router.get("/api/sing-box/logs")
+    def get_sing_box_logs(n: int = 200) -> dict[str, Any]:
+        return {"lines": proc_mgr.get_sing_box_logs(n)}
+
+    @router.delete("/api/sing-box/logs")
+    def clear_sing_box_logs() -> dict[str, Any]:
+        proc_mgr.clear_sing_box_logs()
         return {"ok": True}
 
     # ── Proxy Delay ─────────────────────────────────────────────────────
@@ -112,6 +143,9 @@ def create_router(store: Store, proc_mgr: ProcessManager) -> APIRouter:
 
     @router.post("/api/reload")
     async def reload_mihomo() -> dict[str, Any]:
+        return await _reload_mihomo_config()
+
+    async def _reload_mihomo_config() -> dict[str, Any]:
         state = store.get_state()
         s = state.settings
         config_path = Path(s.data_dir) / "config.yaml"
@@ -143,6 +177,22 @@ def create_router(store: Store, proc_mgr: ProcessManager) -> APIRouter:
         except httpx.ConnectError as exc:
             raise HTTPException(status_code=502, detail="Mihomo reload failed (connection refused)") from exc
 
+    @router.post("/api/apply")
+    async def apply_runtime_config(body: dict[str, Any]) -> dict[str, Any]:
+        apply_mihomo = bool(body.get("mihomo", False))
+        apply_sing_box = bool(body.get("sing_box", False))
+        result: dict[str, Any] = {"mihomo": False, "sing_box": False}
+
+        if apply_mihomo:
+            await _reload_mihomo_config()
+            result["mihomo"] = True
+        if apply_sing_box:
+            state = store.get_state()
+            if not proc_mgr.restart_sing_box(state):
+                raise HTTPException(status_code=500, detail=proc_mgr.sing_box_last_error or "Failed to apply port bindings")
+            result["sing_box"] = True
+        return {"ok": True, **result}
+
     # ── Config Preview ─────────────────────────────────────────────────────
 
     @router.get("/api/config/preview")
@@ -150,6 +200,12 @@ def create_router(store: Store, proc_mgr: ProcessManager) -> APIRouter:
         state = store.get_state()
         yaml_text = config_gen.generate(state)
         return PlainTextResponse(yaml_text, media_type="text/yaml")
+
+    @router.get("/api/sing-box/config/preview")
+    def sing_box_config_preview() -> PlainTextResponse:
+        state = store.get_state()
+        json_text = singbox_gen.generate(state)
+        return PlainTextResponse(json_text, media_type="application/json")
 
     # ── Settings ───────────────────────────────────────────────────────────
 
@@ -352,6 +408,15 @@ def create_router(store: Store, proc_mgr: ProcessManager) -> APIRouter:
         store.add_proxies(nodes)
         return {"imported": len(nodes), "proxies": [n.model_dump() for n in nodes]}
 
+    @router.post("/api/import/sing-box")
+    def import_singbox(body: dict[str, Any]) -> dict[str, Any]:
+        json_text = str(body.get("json", ""))
+        nodes = import_engine.parse_singbox_json(json_text)
+        if not nodes:
+            raise HTTPException(status_code=400, detail="未能解析任何 sing-box 出站配置")
+        store.add_proxies(nodes)
+        return {"imported": len(nodes), "proxies": [n.model_dump() for n in nodes]}
+
     # ── Device Bindings ─────────────────────────────────────────────────
 
     @router.get("/api/device-bindings")
@@ -400,6 +465,31 @@ def create_router(store: Store, proc_mgr: ProcessManager) -> APIRouter:
     def delete_tunnel(tunnel_id: str) -> dict[str, Any]:
         if not store.delete_tunnel(tunnel_id):
             raise HTTPException(status_code=404, detail="Tunnel not found")
+        return {"ok": True}
+
+    # ── sing-box Port Bindings ───────────────────────────────────────────
+
+    @router.get("/api/port-bindings")
+    def get_port_bindings() -> list[PortBinding]:
+        return store.get_port_bindings()
+
+    @router.post("/api/port-bindings", status_code=201)
+    def post_port_binding(body: PortBinding) -> PortBinding:
+        from models import generate_id
+        body.id = generate_id()
+        store.add_port_binding(body)
+        return body
+
+    @router.put("/api/port-bindings/{binding_id}")
+    def put_port_binding(binding_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        if not store.update_port_binding(binding_id, body):
+            raise HTTPException(status_code=404, detail="Port binding not found")
+        return {"ok": True}
+
+    @router.delete("/api/port-bindings/{binding_id}")
+    def delete_port_binding(binding_id: str) -> dict[str, Any]:
+        if not store.delete_port_binding(binding_id):
+            raise HTTPException(status_code=404, detail="Port binding not found")
         return {"ok": True}
 
     # ── Close Connections ─────────────────────────────────────────────────
