@@ -391,6 +391,20 @@ def _copy_if_present(src: dict[str, Any], dst: dict[str, Any], src_key: str, dst
         dst[dst_key or src_key] = src[src_key]
 
 
+def _mbps_to_mihomo(value: Any) -> str | None:
+    """Convert sing-box's numeric Mbps field to Mihomo's bandwidth syntax."""
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        speed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if speed <= 0:
+        return None
+    rendered = str(int(speed)) if speed.is_integer() else str(speed)
+    return f"{rendered} Mbps"
+
+
 def _merge_singbox_tls(node_type: str, tls: Any, extra: dict[str, Any]) -> None:
     if not isinstance(tls, dict):
         return
@@ -402,6 +416,15 @@ def _merge_singbox_tls(node_type: str, tls: Any, extra: dict[str, Any]) -> None:
     _copy_if_present(tls, extra, "alpn")
     if "insecure" in tls:
         extra["skip-cert-verify"] = bool(tls["insecure"])
+
+    # sing-box pins the certificate public key, while Mihomo's `fingerprint`
+    # field expects a SHA-256 hash of the complete certificate.  Copying the
+    # base64 public-key pin into `fingerprint` creates an invalid config.  For
+    # Hysteria2, use the only interoperable fallback: skip CA verification.
+    # The exact raw outbound remains stored below, so sing-box keeps its secure
+    # public-key pin when it is used for a port binding.
+    if node_type == "hysteria2" and tls.get("certificate_public_key_sha256"):
+        extra["skip-cert-verify"] = True
 
     utls = tls.get("utls")
     if isinstance(utls, dict):
@@ -462,6 +485,15 @@ def _singbox_outbound_to_proxy(m: dict[str, Any]) -> ProxyNode | None:
     _copy_if_present(m, node.extra, "flow")
 
     if sing_type == "hysteria2":
+        # sing-box uses numeric Mbps fields, while Mihomo expects values such
+        # as "200 Mbps".  Omitting these makes many Hysteria2 servers fail
+        # bandwidth negotiation and consequently delay tests.
+        up = _mbps_to_mihomo(m.get("up_mbps"))
+        down = _mbps_to_mihomo(m.get("down_mbps"))
+        if up:
+            node.extra["up"] = up
+        if down:
+            node.extra["down"] = down
         _copy_if_present(m, node.extra, "obfs")
         _copy_if_present(m, node.extra, "obfs_password", "obfs-password")
 
@@ -585,6 +617,42 @@ def parse_singbox_json(text: str) -> list[ProxyNode]:
             if node:
                 result.append(node)
     return result
+
+
+def singbox_mihomo_compatibility_warnings(text: str) -> list[str]:
+    """Return conversion caveats that should be shown after a sing-box import.
+
+    The two cores implement Hysteria2 certificate pinning differently: sing-box
+    pins a certificate *public key*, whereas Mihomo's `fingerprint` pins the
+    complete certificate.  Reusing the value would produce an invalid Mihomo
+    configuration, so Mihomo falls back to skipping certificate verification.
+    """
+    try:
+        doc = json.loads(text)
+    except Exception:
+        return []
+    if isinstance(doc, dict) and isinstance(doc.get("outbounds"), list):
+        outbounds = doc["outbounds"]
+    elif isinstance(doc, list):
+        outbounds = doc
+    elif isinstance(doc, dict):
+        outbounds = [doc]
+    else:
+        return []
+
+    warnings: list[str] = []
+    for outbound in outbounds:
+        if not isinstance(outbound, dict):
+            continue
+        tls = outbound.get("tls")
+        pins = tls.get("certificate_public_key_sha256") if isinstance(tls, dict) else None
+        if pins:
+            name = str(outbound.get("tag") or outbound.get("server") or "该节点")
+            warnings.append(
+                f"{name}：sing-box 证书公钥 pin 无法等价转换为 Mihomo 指纹；"
+                "为保证 Hysteria2 可连接，Mihomo 已设置 skip-cert-verify: true。"
+            )
+    return warnings
 
 
 def parse_clash_yaml(text: str) -> list[ProxyNode]:

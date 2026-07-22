@@ -416,7 +416,11 @@ def create_router(store: Store, proc_mgr: ProcessManager) -> APIRouter:
         if not nodes:
             raise HTTPException(status_code=400, detail="未能解析任何 sing-box 出站配置")
         store.add_proxies(nodes)
-        return {"imported": len(nodes), "proxies": [n.model_dump() for n in nodes]}
+        return {
+            "imported": len(nodes),
+            "proxies": [n.model_dump() for n in nodes],
+            "warnings": import_engine.singbox_mihomo_compatibility_warnings(json_text),
+        }
 
     # ── Device Bindings ─────────────────────────────────────────────────
 

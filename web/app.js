@@ -513,7 +513,10 @@ async function doImport() {
       result = await api('/api/import/sing-box', { method: 'POST', body: { json: document.getElementById('importYamlContent').value } });
     if (result.error) { toast(result.error, 'error'); return; }
     closeModal('importModal');
-    toast('成功导入 ' + (result.imported || 0) + ' 个节点');
+    const warning = Array.isArray(result.warnings) && result.warnings.length
+      ? '；注意：' + result.warnings[0]
+      : '';
+    toast('成功导入 ' + (result.imported || 0) + ' 个节点' + warning);
     await loadAll();
   } catch (e) { toast('导入失败: ' + e.message, 'error'); }
 }
