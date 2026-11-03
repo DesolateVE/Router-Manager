@@ -159,7 +159,7 @@
                     <div>
                         <div class="dashboard-kicker">Router Manager</div>
                         <h1 class="dashboard-title">路由与代理总览</h1>
-                        <p class="dashboard-subtitle">保留核心状态信息，复杂调试和连接细节交给 MetaCubeXD 仪表盘。</p>
+                        <p class="dashboard-subtitle">双核心运行状态、实时流量与连接趋势，一屏掌握。</p>
                     </div>
                     <div class="dashboard-actions">
                         <a class="btn btn-primary" href="/metacubexd-entry" target="_blank" rel="noopener noreferrer">mihomo 仪表盘</a>
@@ -167,70 +167,73 @@
                         <button class="btn" onclick="openConfigPreview()">查看配置预览</button>
                     </div>
                 </div>
-                <div class="stats-grid">
-                    <div class="stat-card runtime">
-                        <div class="stat-value" id="statRuntime">离线</div>
-                        <div class="stat-label">核心状态</div>
+                <div class="core-grid" aria-label="核心状态">
+                    <div class="core-card card">
+                        <div class="core-heading">
+                            <div class="core-icon mihomo-icon">M</div>
+                            <div><h2>mihomo</h2><p>规则路由 · 透明代理</p></div>
+                            <span class="core-status" id="mihomoCoreStatus">检测中</span>
+                        </div>
+                        <div class="core-details"><span>核心版本 <strong id="mihomoVersion">检测中…</strong></span><span id="mihomoCoreMeta">--</span></div>
                     </div>
-                    <div class="stat-card mode">
-                        <div class="stat-value" id="statMode">--</div>
-                        <div class="stat-label">运行模式</div>
-                    </div>
-                    <div class="stat-card controller">
-                        <div class="stat-value" id="statController">--</div>
-                        <div class="stat-label">控制端口</div>
-                    </div>
-                    <div class="stat-card speed-dl">
-                        <div class="stat-value" id="statDlSpeed">-- B/s</div>
-                        <div class="stat-label">下行速度</div>
-                    </div>
-                    <div class="stat-card speed-ul">
-                        <div class="stat-value" id="statUlSpeed">-- B/s</div>
-                        <div class="stat-label">上行速度</div>
-                    </div>
-                    <div class="stat-card memory">
-                        <div class="stat-value" id="statMemory">--</div>
-                        <div class="stat-label">内存占用</div>
-                    </div>
-                    <div class="stat-card traffic-down">
-                        <div class="stat-value" id="statDownload">--</div>
-                        <div class="stat-label">累计下载</div>
-                    </div>
-                    <div class="stat-card traffic-up">
-                        <div class="stat-value" id="statUpload">--</div>
-                        <div class="stat-label">累计上传</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-value" id="statProxies">0</div>
-                        <div class="stat-label">代理节点</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-value" id="statGroups">0</div>
-                        <div class="stat-label">策略组</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-value" id="statRules">0</div>
-                        <div class="stat-label">路由规则</div>
+                    <div class="core-card card">
+                        <div class="core-heading">
+                            <div class="core-icon sing-box-icon">S</div>
+                            <div><h2>sing-box</h2><p>独立出口 · 端口绑定</p></div>
+                            <span class="core-status" id="singBoxCoreStatus">检测中</span>
+                        </div>
+                        <div class="core-details"><span>核心版本 <strong id="singBoxVersion">检测中…</strong></span><span id="singBoxCoreMeta">--</span></div>
                     </div>
                 </div>
-                <div class="card dashboard-summary-card">
-                    <div class="card-header">
-                        <span class="card-title">管理建议</span>
+                <div class="dashboard-toolbar">
+                    <div class="dashboard-section-heading"><h2>实时监控</h2><span id="dashboardUpdated" role="status">等待采样</span></div>
+                    <div class="core-switch" role="group" aria-label="选择监控核心">
+                        <button class="active" id="dashboardMihomo" onclick="setDashboardCore('mihomo')" aria-pressed="true">mihomo</button>
+                        <button id="dashboardSingBox" onclick="setDashboardCore('sing_box')" aria-pressed="false">sing-box</button>
                     </div>
-                    <div class="dashboard-summary-grid">
-                        <div class="summary-item">
-                            <div class="summary-label">适用场景</div>
-                            <div class="summary-value">日常查看服务状态、模式与总体流量</div>
-                        </div>
-                        <div class="summary-item">
-                            <div class="summary-label">详细调试</div>
-                            <div class="summary-value">打开 MetaCubeXD 查看连接、规则命中与实时日志</div>
-                        </div>
-                        <div class="summary-item">
-                            <div class="summary-label">配置变更</div>
-                            <div class="summary-value">在当前面板维护节点、策略组、规则，再按需重载配置</div>
-                        </div>
+                </div>
+                <div class="dashboard-notice" id="dashboardNotice" role="status">正在连接核心，获取实时数据…</div>
+                <div class="stats-grid dashboard-stats">
+                    <div class="stat-card speed-dl">
+                        <div class="stat-label"><span class="metric-dot download-dot"></span>下行速度</div>
+                        <div class="stat-value" id="statDlSpeed">--</div>
                     </div>
+                    <div class="stat-card speed-ul">
+                        <div class="stat-label"><span class="metric-dot upload-dot"></span>上行速度</div>
+                        <div class="stat-value" id="statUlSpeed">--</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">活跃连接</div>
+                        <div class="stat-value" id="statConnections">--</div>
+                    </div>
+                    <div class="stat-card traffic-down">
+                        <div class="stat-label">累计下载</div>
+                        <div class="stat-value" id="statDownload">--</div>
+                    </div>
+                    <div class="stat-card traffic-up">
+                        <div class="stat-label">累计上传</div>
+                        <div class="stat-value" id="statUpload">--</div>
+                    </div>
+                    <div class="stat-card memory">
+                        <div class="stat-label">核心内存</div>
+                        <div class="stat-value" id="statMemory">--</div>
+                    </div>
+                </div>
+                <div class="dashboard-charts">
+                    <div class="card chart-card">
+                        <div class="card-header"><h3 class="card-title">流量速率</h3><div class="chart-legend"><span><i class="download-dot"></i>下行</span><span><i class="upload-dot"></i>上行</span></div></div>
+                        <div class="chart-container"><svg id="trafficChart" role="img" aria-label="最近 60 秒上下行速率折线图"></svg><div class="chart-empty" id="trafficChartEmpty">正在等待流量采样</div></div>
+                        <div class="chart-footer"><span>最近 60 秒</span><span>每 2 秒采样</span></div>
+                    </div>
+                    <div class="card chart-card">
+                        <div class="card-header"><h3 class="card-title">连接趋势</h3><div class="chart-legend"><span><i class="connection-dot"></i>活跃连接</span></div></div>
+                        <div class="chart-container"><svg id="connectionsChart" role="img" aria-label="最近 60 秒活跃连接数折线图"></svg><div class="chart-empty" id="connectionsChartEmpty">正在等待连接采样</div></div>
+                        <div class="chart-footer"><span>最近 60 秒</span><span>当前核心</span></div>
+                    </div>
+                </div>
+                <div class="dashboard-footer">
+                    <div class="dashboard-inventory"><span>节点 <strong id="statProxies">0</strong></span><span>策略组 <strong id="statGroups">0</strong></span><span>规则 <strong id="statRules">0</strong></span><span>mihomo 模式 <strong id="statMode">--</strong></span></div>
+                    <p>趋势仅记录本页面会话；累计流量随核心重启重置。</p>
                 </div>
             </div>
 

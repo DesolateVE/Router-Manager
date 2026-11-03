@@ -1,7 +1,10 @@
 """FastAPI route definitions — mirrors src/http/api_server.cpp."""
 from __future__ import annotations
 
+import asyncio
 import json
+import math
+import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -31,10 +34,74 @@ def create_router(store: Store, proc_mgr: ProcessManager) -> APIRouter:
             "mihomo_pid": proc_mgr.get_pid(),
             "sing_box_running": proc_mgr.sing_box_running(),
             "sing_box_pid": proc_mgr.get_sing_box_pid(),
+            "mihomo_version": proc_mgr.get_version("mihomo", s.mihomo_bin),
+            "sing_box_version": proc_mgr.get_version("sing_box", s.sing_box_bin),
             "mihomo_api_port": s.mihomo_api_port,
             "sing_box_api_port": s.sing_box_api_port,
             "management_port": s.management_port,
         }
+
+    @router.get("/api/dashboard")
+    async def get_dashboard() -> dict[str, Any]:
+        """Collect both cores through the management origin, independently of their availability."""
+        s = store.get_settings()
+
+        def number(value: Any) -> int | float | None:
+            if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0:
+                return value
+            return None
+
+        async def snapshot(client: httpx.AsyncClient, running: bool, port: int, secret: str = "") -> dict[str, Any]:
+            result: dict[str, Any] = {
+                "available": False,
+                "download_total": None,
+                "upload_total": None,
+                "memory": None,
+                "connections": None,
+                "error": None,
+            }
+            if not running:
+                result["error"] = "核心未运行"
+                return result
+            try:
+                headers = {"Authorization": f"Bearer {secret}"} if secret else {}
+                response = await client.get(f"http://127.0.0.1:{port}/connections", headers=headers)
+                response.raise_for_status()
+                data = response.json()
+                if not isinstance(data, dict):
+                    raise ValueError("Expected a connections object")
+                download = number(data.get("downloadTotal"))
+                upload = number(data.get("uploadTotal"))
+                if download is None or upload is None:
+                    raise ValueError("Missing traffic totals")
+                result.update(
+                    available=True,
+                    download_total=download,
+                    upload_total=upload,
+                    memory=number(data.get("memory")),
+                    connections=len(data["connections"]) if isinstance(data.get("connections"), list) else None,
+                )
+            except httpx.TimeoutException:
+                result["error"] = "核心 API 响应超时"
+            except httpx.HTTPStatusError as exc:
+                result["error"] = f"核心 API 返回 HTTP {exc.response.status_code}"
+            except httpx.RequestError:
+                result["error"] = "无法连接核心 API"
+            except (ValueError, TypeError):
+                result["error"] = "核心 API 返回无效数据"
+            return result
+
+        # LAN telemetry must never be sent through a proxy inherited from the daemon environment.
+        async with httpx.AsyncClient(trust_env=False, timeout=2.0) as client:
+            mihomo, sing_box = await asyncio.gather(
+                snapshot(client, proc_mgr.running(), s.mihomo_api_port, s.mihomo_api_secret),
+                snapshot(client, proc_mgr.sing_box_running(), s.sing_box_api_port),
+            )
+        for core, sample in (("mihomo", mihomo), ("sing_box", sing_box)):
+            if sample["available"]:
+                resident = proc_mgr.get_memory(core)
+                sample["memory"] = resident if resident is not None else (sample["memory"] or None)
+        return {"timestamp": int(time.time() * 1000), "mihomo": mihomo, "sing_box": sing_box}
 
     # ── Control ────────────────────────────────────────────────────────────
 

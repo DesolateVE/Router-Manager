@@ -10,10 +10,10 @@ Mihomo 用于完整的透明代理、策略组与规则路由；sing-box 用于�
 - 多格式导入：支持 URI、订阅链接、Clash YAML、纯 YAML 代理块与 sing-box outbound JSON。
 - Mihomo 配置：策略组、主规则、嵌套子规则、规则提供者、DNS、设备绑定和流量隧道。
 - sing-box 端口绑定：为一个本地 mixed / SOCKS / HTTP 入站端口指定独立出口节点。
-- 双核心管理：查看状态、启动、停止、重启 Mihomo 与 sing-box。
+- 双核心管理：查看状态、已安装版本，启动、停止、重启 Mihomo 与 sing-box。
 - 双日志面板：在页面中切换查看 Mihomo 或 sing-box 的最近 500 行标准输出日志。
 - 配置应用：Mihomo 使用 API 热重载；变更 sing-box 配置时自动重启 sing-box。
-- 仪表盘：提供 Mihomo MetaCubeXD 与 sing-box MetaCubeXD 两个独立入口。
+- 仪表盘：切换查看两个核心的实时流量、内存、活跃连接及最近 60 秒趋势，并提供两个独立的 MetaCubeXD 入口。
 
 ## 架构与面板说明
 
@@ -26,6 +26,10 @@ Mihomo 用于完整的透明代理、策略组与规则路由；sing-box 用于�
 ```
 
 部署脚本会将随项目提供的 MetaCubeXD 静态资源解压到数据目录。管理服务再将它分别代理给两个核心，因此无需在浏览器中直接访问核心 API 端口，也避免了跨域和防火墙问题。
+
+总览页每约 2 秒通过管理服务采集两个核心的流量快照，无需浏览器直连核心端口。速率由累计流量差与实际采样间隔计算；趋势仅保留当前页面会话的最近 60 秒，离开总览或切到后台时暂停采集。核心停止或 API 不可用时，页面会清除当前读数并显示原因；版本读取自设置中的可执行文件，核心停止后仍可显示。
+
+OpenWrt 上的内存优先读取受管核心进程的常驻内存（RSS），无法读取时使用核心 API 提供的有效数值。
 
 sing-box 官方 Dashboard 已存在，但它依赖 sing-box 1.14 引入的新 gRPC API 服务；本项目当前使用兼容稳定版本的 Clash API。因此这里为 sing-box 提供的是独立的 MetaCubeXD 实例，而不是将不存在的官方页面误指向 `/ui`。
 
@@ -147,7 +151,8 @@ logread | grep '\[sing-box\]'
 
 | 路径 | 方法 | 说明 |
 |---|---|---|
-| `/api/status` | GET | 两个核心的运行状态、PID 与 API 端口 |
+| `/api/status` | GET | 两个核心的运行状态、已安装版本、PID 与 API 端口 |
+| `/api/dashboard` | GET | 双核心流量累计值、内存、活跃连接及各自采集状态 |
 | `/api/start`、`/api/stop`、`/api/restart` | POST | 控制 Mihomo |
 | `/api/sing-box/start`、`/api/sing-box/stop`、`/api/sing-box/restart` | POST | 控制 sing-box |
 | `/api/logs` | GET / DELETE | 读取或清空 Mihomo 日志 |

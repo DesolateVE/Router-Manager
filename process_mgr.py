@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import collections
+import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -57,6 +59,64 @@ class ProcessManager:
         self._sing_box_proc: subprocess.Popen | None = None
         self.last_error: str = ""
         self.sing_box_last_error: str = ""
+        self._version_cache: dict[str, tuple[tuple, float, str | None]] = {}
+        self._version_lock = threading.Lock()
+
+    def get_version(self, core: str, binary: str) -> str | None:
+        """Read the installed binary's version, including while its core is stopped."""
+        if core not in ("mihomo", "sing_box"):
+            raise ValueError(f"Unknown core: {core}")
+        executable = shutil.which(binary) or binary
+        try:
+            stat = Path(executable).stat()
+            signature = (executable, stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+        except OSError:
+            signature = (executable, None)
+        # A stat change invalidates the cache immediately after a binary upgrade.
+        with self._version_lock:
+            cached = self._version_cache.get(core)
+            if cached and cached[0] == signature and time.monotonic() < cached[1]:
+                return cached[2]
+            version = None
+            try:
+                result = subprocess.run(
+                    [executable, "-v" if core == "mihomo" else "version"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    errors="replace",
+                    timeout=2.0,
+                    check=True,
+                )
+                pattern = r"^\s*mihomo(?:\s+meta)?\s+(\S+)" if core == "mihomo" else r"^\s*sing-box\s+version\s+(\S+)"
+                match = re.search(pattern, result.stdout, re.IGNORECASE | re.MULTILINE)
+                if match:
+                    version = match.group(1)
+            except (OSError, subprocess.SubprocessError):
+                pass
+            # Briefly cache failures so a missing or broken binary cannot be spawned on every poll.
+            self._version_cache[core] = (signature, time.monotonic() + (300 if version else 30), version)
+            return version
+
+    def get_memory(self, core: str) -> int | None:
+        """Return a managed core's resident memory in bytes on Linux."""
+        if core == "mihomo":
+            pid = self.get_pid()
+        elif core == "sing_box":
+            pid = self.get_sing_box_pid()
+        else:
+            raise ValueError(f"Unknown core: {core}")
+        if pid is None:
+            return None
+        try:
+            pid = int(pid)
+            if pid <= 0:
+                return None
+            status = Path(f"/proc/{pid}/status").read_text(encoding="utf-8", errors="replace")
+            match = re.search(r"^VmRSS:\s+(\d+)\s+kB\s*$", status, re.MULTILINE)
+            return int(match.group(1)) * 1024 if match else None
+        except (OSError, TypeError, ValueError):
+            return None
 
     def start(self, state: AppState) -> bool:
         if self.running():

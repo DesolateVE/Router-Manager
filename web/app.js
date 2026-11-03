@@ -6,8 +6,6 @@ let portBindings = [];
 let subRuleSets = {};  // dict: set_name -> [SubRuleEntry]
 let ruleProviders = {};  // dict: name -> RuleProvider
 let proxyLatency = {};  // id -> ms (null=testing, -1=error)
-let _connWs = null, _connData = [], _connPrev = null, _connPrevTime = 0, _connPrevMap = {};
-let _connWsStopped = false;
 const MIHOMO_CONFIG_DIRTY_KEY = 'routerManagerConfigDirty';
 const SING_BOX_CONFIG_DIRTY_KEY = 'routerManagerSingBoxConfigDirty';
 
@@ -133,6 +131,8 @@ function activateTab(tabName) {
   }
   if (tabName === 'dashboard') {
     renderDashboardSummary();
+    renderDashboard();
+    refreshDashboard();
   }
 }
 
@@ -167,77 +167,8 @@ function formatBytes(b) {
   return (b / 1073741824).toFixed(2) + ' GB';
 }
 
-// ── Connections WebSocket ──
-function startConnWs() {
-  _connWsStopped = false;
-  _doConnWs();
-}
-
-function stopConnWs() {
-  _connWsStopped = true;
-  if (_connWs) { _connWs.onclose = null; _connWs.close(); _connWs = null; }
-  _connData = []; _connPrev = null; _connPrevMap = {};
-}
-
-function _doConnWs() {
-  if (_connWs || _connWsStopped) return;
-  if (!settings || !settings.mihomo_api_port) return;
-  const host = window.location.hostname || '127.0.0.1';
-  const qs = settings.mihomo_api_secret ? '?token=' + encodeURIComponent(settings.mihomo_api_secret) : '';
-  const wsUrl = 'ws://' + host + ':' + settings.mihomo_api_port + '/connections' + qs;
-  try { _connWs = new WebSocket(wsUrl); } catch (_) { return; }
-  _connWs.onmessage = (e) => {
-    try {
-      const data = JSON.parse(e.data);
-      const now = Date.now();
-      const dt = _connPrevTime > 0 ? (now - _connPrevTime) / 1000 : 0;
-      const conns = data.connections || [];
-      const newMap = {};
-      conns.forEach(c => {
-        const prev = _connPrevMap[c.id];
-        c._dlSpeed = (dt > 0 && prev) ? Math.max(0, (c.download - prev.dl) / dt) : 0;
-        c._ulSpeed = (dt > 0 && prev) ? Math.max(0, (c.upload - prev.ul) / dt) : 0;
-        newMap[c.id] = { dl: c.download, ul: c.upload };
-      });
-      _connPrevMap = newMap;
-      let dlSpeed = 0, ulSpeed = 0;
-      if (_connPrev && dt > 0) {
-        dlSpeed = Math.max(0, (data.downloadTotal - _connPrev.dl) / dt);
-        ulSpeed = Math.max(0, (data.uploadTotal - _connPrev.ul) / dt);
-      }
-      _connPrev = { dl: data.downloadTotal, ul: data.uploadTotal };
-      _connPrevTime = now;
-      _connData = conns;
-      updateDashboardStats(data, dlSpeed, ulSpeed);
-      renderConnTable();
-    } catch (_) {}
-  };
-  _connWs.onclose = () => { _connWs = null; if (!_connWsStopped) setTimeout(_doConnWs, 4000); };
-  _connWs.onerror = () => {};
-}
-
-function updateDashboardStats(data, dlSpeed, ulSpeed) {
-  const el = (id) => document.getElementById(id);
-  if (el('statDownload')) el('statDownload').textContent = formatBytes(data.downloadTotal);
-  if (el('statUpload'))   el('statUpload').textContent   = formatBytes(data.uploadTotal);
-  if (el('statDlSpeed'))  el('statDlSpeed').textContent  = formatSpeed(dlSpeed);
-  if (el('statUlSpeed'))  el('statUlSpeed').textContent  = formatSpeed(ulSpeed);
-  if (el('statMemory'))   el('statMemory').textContent   = formatBytes(data.memory);
-}
-
-function renderDashboardSummary() {
-  const modeMap = { rule: '规则', global: '全局', direct: '直连' };
-  const modeEl = document.getElementById('statMode');
-  const controllerEl = document.getElementById('statController');
-  if (modeEl) {
-    modeEl.textContent = modeMap[settings.mode] || settings.mode || '--';
-  }
-  if (controllerEl) {
-    controllerEl.textContent = settings.mihomo_api_port ? ':' + settings.mihomo_api_port : '--';
-  }
-}
-
 function formatSpeed(bps) {
+  if (bps == null || !Number.isFinite(bps)) return '--';
   if (!bps) return '0 B/s';
   if (bps < 1024)       return Math.round(bps) + ' B/s';
   if (bps < 1048576)    return (bps / 1024).toFixed(1) + ' KB/s';
@@ -245,44 +176,224 @@ function formatSpeed(bps) {
   return (bps / 1073741824).toFixed(2) + ' GB/s';
 }
 
-function elapsedTime(startIso) {
-  const sec = Math.floor((Date.now() - new Date(startIso)) / 1000);
-  if (sec < 60)   return sec + 's';
-  if (sec < 3600) return Math.floor(sec / 60) + 'm' + (sec % 60) + 's';
-  return Math.floor(sec / 3600) + 'h' + Math.floor((sec % 3600) / 60) + 'm';
+// ── Dashboard telemetry (same-origin; independent history for each core) ──
+const DASHBOARD_WINDOW_MS = 60000;
+const DASHBOARD_GAP_MS = 7000;
+const dashboardCores = ['mihomo', 'sing_box'];
+const dashboardData = Object.fromEntries(dashboardCores.map(core => [core, {
+  history: [], previous: null, latest: null, down: null, up: null,
+  error: '正在连接核心，获取实时数据…', receivedAt: 0, timestamp: 0
+}]));
+let dashboardCore = 'mihomo';
+let dashboardBusy = false;
+let dashboardStatus = null;
+let statusBusy = false;
+
+function dashboardIsVisible() {
+  return !document.hidden && document.getElementById('panel-dashboard').classList.contains('active');
 }
 
-async function closeConn(id) {
-  try { await api('/api/connections/' + encodeURIComponent(id), { method: 'DELETE' }); }
-  catch (e) { toast('关闭失败: ' + e.message, 'error'); }
+function setDashboardCore(core) {
+  dashboardCore = core === 'sing_box' ? 'sing_box' : 'mihomo';
+  renderDashboard();
+  refreshDashboard();
 }
 
-async function closeAllConns() {
-  try { await api('/api/connections', { method: 'DELETE' }); toast('已关闭全部连接'); }
-  catch (e) { toast('关闭失败: ' + e.message, 'error'); }
+function clearDashboardCore(core, message, timestamp = Date.now()) {
+  const data = dashboardData[core];
+  data.previous = null;
+  data.latest = null;
+  data.down = data.up = null;
+  data.error = message;
+  data.history.push({ timestamp, down: null, up: null, connections: null });
+  data.history = data.history.filter(point => timestamp - point.timestamp <= DASHBOARD_WINDOW_MS).slice(-40);
+}
+
+function acceptDashboardSample(core, sample, timestamp, receivedAt) {
+  const data = dashboardData[core];
+  if (!sample || !sample.available) {
+    const running = dashboardStatus && dashboardStatus[core === 'mihomo' ? 'mihomo_running' : 'sing_box_running'];
+    clearDashboardCore(core, running === false ? '核心已停止，启动后即可查看实时数据。' : (sample && sample.error) || '暂时无法获取核心数据，正在重试。', timestamp);
+    return;
+  }
+  const nonnegative = value => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+  const current = {
+    ...sample,
+    download_total: nonnegative(sample.download_total) ? sample.download_total : null,
+    upload_total: nonnegative(sample.upload_total) ? sample.upload_total : null,
+    connections: nonnegative(sample.connections) ? sample.connections : null,
+    memory: nonnegative(sample.memory) ? sample.memory : null
+  };
+  const previous = data.previous;
+  const elapsed = previous ? timestamp - previous.timestamp : 0;
+  const counterReset = previous && (
+    (current.download_total != null && previous.download_total != null && current.download_total < previous.download_total) ||
+    (current.upload_total != null && previous.upload_total != null && current.upload_total < previous.upload_total)
+  );
+  if ((!previous && data.history.length) || counterReset || elapsed > DASHBOARD_GAP_MS || (previous && elapsed <= 0)) {
+    data.history.push({ timestamp: timestamp - 1, down: null, up: null, connections: null });
+  }
+  const canCalculate = previous && elapsed > 0 && elapsed <= DASHBOARD_GAP_MS && !counterReset;
+  data.down = canCalculate && current.download_total != null && previous.download_total != null
+    ? (current.download_total - previous.download_total) / (elapsed / 1000) : null;
+  data.up = canCalculate && current.upload_total != null && previous.upload_total != null
+    ? (current.upload_total - previous.upload_total) / (elapsed / 1000) : null;
+  data.previous = { ...current, timestamp };
+  data.latest = current;
+  data.timestamp = timestamp;
+  data.receivedAt = receivedAt;
+  data.error = '';
+  data.history.push({ timestamp, down: data.down, up: data.up, connections: current.connections });
+  data.history = data.history.filter(point => timestamp - point.timestamp <= DASHBOARD_WINDOW_MS).slice(-40);
+}
+
+async function refreshDashboard() {
+  if (dashboardBusy || !dashboardIsVisible()) return;
+  dashboardBusy = true;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 6000);
+  try {
+    const payload = await api('/api/dashboard', { signal: controller.signal });
+    const receivedAt = Date.now();
+    const timestamp = Number.isFinite(payload.timestamp) ? payload.timestamp : receivedAt;
+    dashboardCores.forEach(core => acceptDashboardSample(core, payload[core], timestamp, receivedAt));
+  } catch (_) {
+    dashboardCores.forEach(core => clearDashboardCore(core, '实时数据连接中断，正在自动重试。'));
+  } finally {
+    clearTimeout(timeout);
+    dashboardBusy = false;
+    renderDashboard();
+  }
+}
+
+function renderDashboardSummary() {
+  const modeMap = { rule: '规则', global: '全局', direct: '直连' };
+  document.getElementById('statMode').textContent = modeMap[settings.mode] || settings.mode || '--';
+}
+
+function renderDashboard() {
+  const data = dashboardData[dashboardCore];
+  // A suspended browser may resume before the next poll completes.
+  const stale = data.latest && Date.now() - data.receivedAt > DASHBOARD_GAP_MS;
+  const current = stale ? null : data.latest;
+  const text = (id, value) => { document.getElementById(id).textContent = value; };
+  const notice = document.getElementById('dashboardNotice');
+  notice.hidden = !!current;
+  notice.textContent = stale ? '数据已过期，正在重新获取…' : data.error;
+  text('statDlSpeed', current ? formatSpeed(data.down) : '--');
+  text('statUlSpeed', current ? formatSpeed(data.up) : '--');
+  text('statDownload', formatBytes(current && current.download_total));
+  text('statUpload', formatBytes(current && current.upload_total));
+  text('statMemory', formatBytes(current && current.memory));
+  text('statConnections', current && current.connections != null ? current.connections.toLocaleString() : '--');
+  text('dashboardUpdated', current
+    ? '已更新 ' + new Date(data.receivedAt).toLocaleTimeString('zh-CN', { hour12: false })
+    : '等待实时数据');
+  [['dashboardMihomo', 'mihomo'], ['dashboardSingBox', 'sing_box']].forEach(([id, core]) => {
+    const button = document.getElementById(id);
+    button.classList.toggle('active', dashboardCore === core);
+    button.setAttribute('aria-pressed', String(dashboardCore === core));
+  });
+  if (!dashboardIsVisible()) return;
+  const history = current ? data.history : [];
+  const now = current ? data.timestamp : Date.now();
+  drawDashboardChart('trafficChart', 'trafficChartEmpty', history, now, [
+    { key: 'down', color: '#3b82f6', name: '下行' },
+    { key: 'up', color: '#f59e0b', name: '上行' }
+  ], formatSpeed, current ? '正在采样，稍后显示速率曲线' : '核心数据暂不可用');
+  drawDashboardChart('connectionsChart', 'connectionsChartEmpty', history, now, [
+    { key: 'connections', color: '#10b981', name: '连接' }
+  ], value => Math.round(value).toLocaleString(), current ? '核心未提供连接数据' : '核心数据暂不可用');
+}
+
+function drawDashboardChart(id, emptyId, history, now, series, formatter, emptyText) {
+  const svg = document.getElementById(id);
+  const width = Math.max(180, svg.clientWidth || 500);
+  const height = 218, left = 58, right = width - 8, top = 12, bottom = height - 30;
+  const start = now - DASHBOARD_WINDOW_MS;
+  const points = history.filter(point => point.timestamp >= start && point.timestamp <= now);
+  const values = points.flatMap(point => series.map(line => point[line.key])).filter(Number.isFinite);
+  const maxValue = Math.max(1, ...values) * 1.18;
+  const ceiling = Math.max(4, Math.ceil(maxValue / 4) * 4);
+  const x = timestamp => left + (timestamp - start) / DASHBOARD_WINDOW_MS * (right - left);
+  const y = value => bottom - value / ceiling * (bottom - top);
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  let markup = '';
+  for (let tick = 0; tick <= 4; tick++) {
+    const value = ceiling * tick / 4, row = y(value);
+    markup += `<line x1="${left}" y1="${row}" x2="${right}" y2="${row}" stroke="#edf1f6" stroke-dasharray="3 4"/><text x="${left - 8}" y="${row + 3}" text-anchor="end">${esc(formatter(value))}</text>`;
+  }
+  for (let tick = 0; tick <= 4; tick++) {
+    const timestamp = start + tick * DASHBOARD_WINDOW_MS / 4;
+    markup += `<text x="${x(timestamp)}" y="${height - 8}" text-anchor="${tick === 0 ? 'start' : tick === 4 ? 'end' : 'middle'}">${tick === 4 ? '现在' : (60 - tick * 15) + ' 秒前'}</text>`;
+  }
+  series.forEach(line => {
+    let segments = [], segment = [];
+    points.forEach(point => {
+      if (Number.isFinite(point[line.key])) segment.push(point);
+      else if (segment.length) { segments.push(segment); segment = []; }
+    });
+    if (segment.length) segments.push(segment);
+    segments.forEach(group => {
+      const coordinates = group.map(point => `${x(point.timestamp).toFixed(2)},${y(point[line.key]).toFixed(2)}`);
+      if (group.length > 1) {
+        const area = `${x(group[0].timestamp)},${bottom} ${coordinates.join(' ')} ${x(group[group.length - 1].timestamp)},${bottom}`;
+        markup += `<polygon points="${area}" fill="${line.color}" opacity="0.06"/><polyline points="${coordinates.join(' ')}" fill="none" stroke="${line.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+      }
+      group.forEach((point, index) => {
+        const radius = group.length === 1 || index === group.length - 1 ? 2.5 : 0;
+        markup += `<circle cx="${x(point.timestamp)}" cy="${y(point[line.key])}" r="${radius}" fill="${line.color}"/><circle cx="${x(point.timestamp)}" cy="${y(point[line.key])}" r="7" fill="transparent"><title>${esc(line.name + ' ' + formatter(point[line.key]))}</title></circle>`;
+      });
+    });
+  });
+  svg.innerHTML = markup;
+  const empty = document.getElementById(emptyId);
+  empty.hidden = values.length > 0;
+  empty.textContent = emptyText;
+}
+
+function renderCoreStatus(status) {
+  const unknown = !status;
+  dashboardCores.forEach(core => {
+    const isMihomo = core === 'mihomo';
+    const prefix = isMihomo ? 'mihomo' : 'singBox';
+    const running = status && status[isMihomo ? 'mihomo_running' : 'sing_box_running'];
+    const pid = status && status[isMihomo ? 'mihomo_pid' : 'sing_box_pid'];
+    const version = status && status[isMihomo ? 'mihomo_version' : 'sing_box_version'];
+    const port = status && status[isMihomo ? 'mihomo_api_port' : 'sing_box_api_port'];
+    const oldPid = dashboardStatus && dashboardStatus[isMihomo ? 'mihomo_pid' : 'sing_box_pid'];
+    if (running && oldPid && oldPid !== pid) clearDashboardCore(core, '核心已重启，正在重新采样。');
+    const badge = document.getElementById(prefix + 'CoreStatus');
+    badge.textContent = unknown ? '连接中断' : running ? '运行中' : '已停止';
+    badge.className = 'core-status ' + (unknown ? 'unknown' : running ? 'running' : 'stopped');
+    document.getElementById(prefix + 'Version').textContent = unknown ? '--' : version || '未获取到版本';
+    document.getElementById(prefix + 'CoreMeta').textContent = unknown ? '--' : ('API :' + port + (running ? ' · PID ' + pid : ''));
+    const processStatus = document.getElementById(isMihomo ? 'mihomoProcessStatus' : 'singBoxProcessStatus');
+    processStatus.innerHTML = '<span class="status-dot ' + (running ? 'on' : 'off') + '"></span>' +
+      (unknown ? '状态未知' : running ? '运行中 (PID: ' + esc(String(pid)) + ')' : '已停止');
+    if (!unknown && !running) clearDashboardCore(core, '核心已停止，启动后即可查看实时数据。');
+  });
 }
 
 // ── Status/Control ──
 async function refreshStatus() {
+  if (statusBusy || document.hidden) return;
+  statusBusy = true;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 6000);
   try {
-    const s = await api('/api/status');
-    const running = s.mihomo_running;
-    const singBoxRunning = s.sing_box_running;
-    const runtimeEl = document.getElementById('statRuntime');
-    const mihomoProcessStatusEl = document.getElementById('mihomoProcessStatus');
-    const singBoxProcessStatusEl = document.getElementById('singBoxProcessStatus');
-    if (runtimeEl) runtimeEl.textContent = running ? '在线' : '离线';
-    if (mihomoProcessStatusEl) {
-      mihomoProcessStatusEl.innerHTML = running
-        ? '<span class="status-dot on"></span>运行中 (PID: ' + s.mihomo_pid + ')'
-        : '<span class="status-dot off"></span>已停止';
-    }
-    if (singBoxProcessStatusEl) {
-      singBoxProcessStatusEl.innerHTML = singBoxRunning
-        ? '<span class="status-dot on"></span>运行中 (PID: ' + s.sing_box_pid + ')'
-        : '<span class="status-dot off"></span>已停止';
-    }
-  } catch (e) { console.error(e); }
+    const status = await api('/api/status', { signal: controller.signal });
+    renderCoreStatus(status);
+    dashboardStatus = status;
+  } catch (_) {
+    renderCoreStatus(null);
+    dashboardStatus = null;
+    dashboardCores.forEach(core => clearDashboardCore(core, '管理服务连接中断，正在自动重试。'));
+  } finally {
+    clearTimeout(timeout);
+    statusBusy = false;
+    renderDashboard();
+  }
 }
 
 async function controlMihomo(action) {
@@ -290,8 +401,9 @@ async function controlMihomo(action) {
     await api('/api/' + action, { method: 'POST' });
     if (action === 'start' || action === 'restart') clearMihomoConfigDirty();
     toast(action === 'start' ? '已启动' : action === 'stop' ? '已停止' : '已重启');
-    if (action === 'stop') { stopConnWs(); }
-    if (action === 'start' || action === 'restart') { setTimeout(startConnWs, 1200); }
+    clearDashboardCore('mihomo', action === 'stop' ? '核心已停止，启动后即可查看实时数据。' : '正在重新采样…');
+    renderDashboard();
+    setTimeout(refreshDashboard, 1200);
     setTimeout(refreshStatus, 500);
   } catch (e) { toast('操作失败: ' + e.message, 'error'); }
 }
@@ -300,6 +412,9 @@ async function controlSingBox(action) {
   try {
     await api('/api/sing-box/' + action, { method: 'POST' });
     toast(action === 'start' ? 'sing-box 已启动' : action === 'stop' ? 'sing-box 已停止' : 'sing-box 已重启');
+    clearDashboardCore('sing_box', action === 'stop' ? '核心已停止，启动后即可查看实时数据。' : '正在重新采样…');
+    renderDashboard();
+    setTimeout(refreshDashboard, 1200);
     setTimeout(refreshStatus, 500);
   } catch (e) { toast('sing-box 操作失败: ' + e.message, 'error'); }
 }
@@ -323,7 +438,6 @@ async function loadAll() {
     document.getElementById('statProxies').textContent = proxies.length;
     document.getElementById('statGroups').textContent = groups.length;
     document.getElementById('statRules').textContent = rules.length;
-    startConnWs();
     if (document.getElementById('subRulePanel').classList.contains('show')) renderSubRulePanel();
     if (document.getElementById('ruleProviderPanel').classList.contains('show')) renderRuleProviderPanel();
   } catch (e) { console.error(e); }
@@ -1724,6 +1838,22 @@ renderConfigDirtyBanner();
 loadAll();
 refreshStatus();
 setInterval(refreshStatus, 5000);
+renderDashboard();
+refreshDashboard();
+setInterval(() => {
+  if (dashboardIsVisible()) {
+    renderDashboard();
+    refreshDashboard();
+  }
+}, 2000);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    renderDashboard();
+    refreshStatus();
+    refreshDashboard();
+  }
+});
+window.addEventListener('resize', () => { if (dashboardIsVisible()) renderDashboard(); });
 
 // ── Logs ──
 let _lastLogSignature = null;
